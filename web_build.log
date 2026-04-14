@@ -1,0 +1,68 @@
+
+> emerald-hubble@1.0.0 web
+> expo start --web --port 8084
+
+Starting project at /Users/nomadller/.gemini/antigravity/playground/emerald-hubble
+Starting Metro Bundler
+Waiting on http://localhost:8084
+Logs for your project will appear below.
+Web Bundling failed 496ms node_modules/expo-router/entry.js (1008 modules)
+ ERROR  SyntaxError: /Users/nomadller/.gemini/antigravity/playground/emerald-hubble/app/(admin)/operations.tsx: Expected corresponding JSX closing tag for <View>. (440:24)
+
+  438 |                             <View style={{ flex: 1 }}><FormField label="To" value={editingBooking?.dep_arr_airport || 'Cochin Airport'} onChange={v => setEditingBooking(p => p ? {...p, dep_arr_airport: v} : null)} /></View>
+  439 |                           </View>
+> 440 |                         </>
+      |                         ^
+  441 |                       )}
+  442 |                       {item.key === 'itinerary' && (
+  443 |                         <View style={{ gap: 10 }}>
+    at constructor (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:365:19)
+    at TypeScriptParserMixin.raise (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:6599:19)
+    at TypeScriptParserMixin.jsxParseElementAt (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:4722:14)
+    at TypeScriptParserMixin.jsxParseElement (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:4749:17)
+    at TypeScriptParserMixin.parseExprAtom (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:4759:19)
+    at TypeScriptParserMixin.parseExprSubscripts (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:11081:23)
+    at TypeScriptParserMixin.parseUpdate (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:11066:21)
+    at TypeScriptParserMixin.parseMaybeUnary (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:11046:23)
+    at TypeScriptParserMixin.parseMaybeUnary (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:9837:18)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:10899:61)
+    at TypeScriptParserMixin.parseExprOps (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:10904:23)
+    at TypeScriptParserMixin.parseMaybeConditional (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:10881:23)
+    at TypeScriptParserMixin.parseMaybeAssign (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:10831:21)
+    at /Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:9775:39
+    at TypeScriptParserMixin.tryParse (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:6907:20)
+    at TypeScriptParserMixin.parseMaybeAssign (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:9775:18)
+    at /Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:10800:39
+    at TypeScriptParserMixin.allowInAnd (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:12426:12)
+    at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:10800:17)
+    at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:12493:17)
+    at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:11675:28)
+    at TypeScriptParserMixin.parseExprAtom (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:11331:23)
+    at TypeScriptParserMixin.parseExprAtom (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:4764:20)
+    at TypeScriptParserMixin.parseExprSubscripts (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:11081:23)
+    at TypeScriptParserMixin.parseUpdate (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:11066:21)
+    at TypeScriptParserMixin.parseMaybeUnary (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:11046:23)
+    at TypeScriptParserMixin.parseMaybeUnary (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:9837:18)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:10899:61)
+    at TypeScriptParserMixin.parseExprOpBaseRightExpr (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:10986:34)
+    at TypeScriptParserMixin.parseExprOpRightExpr (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:10981:21)
+    at TypeScriptParserMixin.parseExprOp (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:10947:27)
+    at TypeScriptParserMixin.parseExprOp (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:9306:18)
+    at TypeScriptParserMixin.parseExprOp (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:10953:21)
+    at TypeScriptParserMixin.parseExprOp (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:9306:18)
+    at TypeScriptParserMixin.parseExprOps (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:10908:17)
+    at TypeScriptParserMixin.parseMaybeConditional (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:10881:23)
+    at TypeScriptParserMixin.parseMaybeAssign (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:10831:21)
+    at TypeScriptParserMixin.parseMaybeAssign (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:9786:20)
+    at TypeScriptParserMixin.parseExpressionBase (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:10784:23)
+    at /Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:10780:39
+    at TypeScriptParserMixin.allowInAnd (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:12426:12)
+    at TypeScriptParserMixin.parseExpression (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:10780:17)
+    at TypeScriptParserMixin.jsxParseExpressionContainer (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:4632:31)
+    at TypeScriptParserMixin.jsxParseElementAt (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:4711:36)
+    at TypeScriptParserMixin.jsxParseElement (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:4749:17)
+    at TypeScriptParserMixin.parseExprAtom (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:4759:19)
+    at TypeScriptParserMixin.parseExprSubscripts (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:11081:23)
+    at TypeScriptParserMixin.parseUpdate (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:11066:21)
+    at TypeScriptParserMixin.parseMaybeUnary (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:11046:23)
+    at TypeScriptParserMixin.parseMaybeUnary (/Users/nomadller/.gemini/antigravity/playground/emerald-hubble/node_modules/@babel/parser/lib/index.js:9837:18)

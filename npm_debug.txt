@@ -1,0 +1,11 @@
+
+> emerald-hubble@1.0.0 web
+> expo start --web
+
+Starting project at /Users/nomadller/.gemini/antigravity/playground/emerald-hubble
+› Port 8081 is running this app in another window
+  /Users/nomadller/.gemini/antigravity/playground/emerald-hubble (pid 6884)
+Input is required, but 'npx expo' is in non-interactive mode.
+Required input:
+> Use port 8082 instead?
+› Skipping dev server
