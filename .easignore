@@ -1,0 +1,10 @@
+node_modules/
+.git/
+.expo/
+web-build/
+dist/
+*.log
+npm_output.txt
+npm_debug.txt
+bundle_output.json
+web_build.log

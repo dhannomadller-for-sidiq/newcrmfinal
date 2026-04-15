@@ -84,6 +84,7 @@ export default function FollowupsScreen() {
   const [fAdvance, setFAdvance] = useState('');
   const [fPassportNo, setFPassportNo] = useState('');
   const [fPassportName, setFPassportName] = useState('');
+  const [fArrPNR, setFArrPNR] = useState('');
   const [fArrFlight, setFArrFlight] = useState('');
   const [fArrDepPlace, setFArrDepPlace] = useState('Cochin Airport');
   const [fArrDepDate, setFArrDepDate] = useState('');
@@ -91,6 +92,7 @@ export default function FollowupsScreen() {
   const [fArrArrAirport, setFArrArrAirport] = useState('Denpasar Airport');
   const [fArrArrDate, setFArrArrDate] = useState('');
   const [fArrArrTime, setFArrArrTime] = useState('');
+  const [fDepPNR, setFDepPNR] = useState('');
   const [fDepFlight, setFDepFlight] = useState('');
   const [fDepDepPlace, setFDepDepPlace] = useState('Denpasar Airport');
   const [fDepDepDate, setFDepDepDate] = useState('');
@@ -190,9 +192,10 @@ export default function FollowupsScreen() {
     // reset advance paid
     setFTotal(''); setFAdvance('');
     setFPassportNo(''); setFPassportName('');
-    setFArrFlight(''); setFArrDepPlace('Cochin Airport'); setFArrDepDate(''); setFArrDepTime('');
+    setFPassportNo(''); setFPassportName('');
+    setFArrPNR(''); setFArrFlight(''); setFArrDepPlace('Cochin Airport'); setFArrDepDate(''); setFArrDepTime('');
     setFArrArrAirport('Denpasar Airport'); setFArrArrDate(''); setFArrArrTime('');
-    setFDepFlight(''); setFDepDepPlace('Denpasar Airport'); setFDepDepDate(''); setFDepDepTime('');
+    setFDepPNR(''); setFDepFlight(''); setFDepDepPlace('Denpasar Airport'); setFDepDepDate(''); setFDepDepTime('');
     setFDepArrAirport('Cochin Airport'); setFDepArrDate(''); setFDepArrTime('');
     setUpdateModal(true);
   }
@@ -386,9 +389,11 @@ export default function FollowupsScreen() {
         itinerary_id: updateLead.itinerary_id || null,
         total_amount: total, advance_paid: advance, due_amount: total - advance,
         passport_no: fPassportNo, passport_name: fPassportName,
+        arr_pnr: fArrPNR,
         arr_flight_no: fArrFlight, arr_dep_place: fArrDepPlace,
         arr_dep_date: fArrDepDate || null, arr_dep_time: fArrDepTime || null,
         arr_arr_airport: fArrArrAirport, arr_arr_date: fArrArrDate || null, arr_arr_time: fArrArrTime || null,
+        dep_pnr: fDepPNR,
         dep_flight_no: fDepFlight, dep_dep_place: fDepDepPlace,
         dep_dep_date: fDepDepDate || null, dep_dep_time: fDepDepTime || null,
         dep_arr_airport: fDepArrAirport, dep_arr_date: fDepArrDate || null, dep_arr_time: fDepArrTime || null,
@@ -856,7 +861,10 @@ export default function FollowupsScreen() {
                 <FField label="Name (as on Passport)" value={fPassportName} onChange={setFPassportName} placeholder="JOHN DOE" autoCapitalize="characters" />
 
                 <Text style={s.subHeading}>✈️ Arrival Flight (India → Destination)</Text>
-                <FField label="Flight No" value={fArrFlight} onChange={setFArrFlight} placeholder="6E 2345" autoCapitalize="characters" />
+                <View style={s.rowTwo}>
+                  <View style={{ flex: 1 }}><FField label="Arrival PNR" value={fArrPNR} onChange={setFArrPNR} placeholder="PNR" autoCapitalize="characters" /></View>
+                  <View style={{ flex: 1 }}><FField label="Flight No" value={fArrFlight} onChange={setFArrFlight} placeholder="6E 2345" autoCapitalize="characters" /></View>
+                </View>
                 <FField label="Departure Place" value={fArrDepPlace} onChange={setFArrDepPlace} placeholder="Cochin Airport" />
                 <View style={s.rowTwo}>
                   <View style={{ flex: 1 }}><FField label="Dep Date (YYYY-MM-DD)" value={fArrDepDate} onChange={setFArrDepDate} placeholder="2026-05-10" /></View>
@@ -869,7 +877,10 @@ export default function FollowupsScreen() {
                 </View>
 
                 <Text style={s.subHeading}>✈️ Departure Flight (Destination → India)</Text>
-                <FField label="Flight No" value={fDepFlight} onChange={setFDepFlight} placeholder="6E 2346" autoCapitalize="characters" />
+                <View style={s.rowTwo}>
+                  <View style={{ flex: 1 }}><FField label="Departure PNR" value={fDepPNR} onChange={setFDepPNR} placeholder="PNR" autoCapitalize="characters" /></View>
+                  <View style={{ flex: 1 }}><FField label="Flight No" value={fDepFlight} onChange={setFDepFlight} placeholder="6E 2346" autoCapitalize="characters" /></View>
+                </View>
                 <FField label="Departure Place" value={fDepDepPlace} onChange={setFDepDepPlace} placeholder="Denpasar Airport" />
                 <View style={s.rowTwo}>
                   <View style={{ flex: 1 }}><FField label="Dep Date (YYYY-MM-DD)" value={fDepDepDate} onChange={setFDepDepDate} placeholder="2026-05-15" /></View>

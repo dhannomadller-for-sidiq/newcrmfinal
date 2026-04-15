@@ -5,6 +5,33 @@ import { supabase } from '@/utils/supabase';
 import { Lead, Destination, Itinerary, OPTION_META, FOLLOWUP_STATUSES } from '@/lib/salesConstants';
 import { DateField } from './DateField';
 
+function FF({ label, value, onChange, placeholder, keyboardType = 'default', autoCapitalize = 'sentences', styles }: any) {
+  return (
+    <View style={styles.fieldGroup}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TextInput style={styles.input} value={value} onChangeText={onChange} placeholder={placeholder}
+        placeholderTextColor="#475569" keyboardType={keyboardType as any} autoCapitalize={autoCapitalize} />
+    </View>
+  );
+}
+
+function NextFollowup({ date, setDate, showPicker, setShowPicker, time, setTime, styles }: any) {
+  return (
+    <View style={{ gap: 8, marginTop: 8 }}>
+      <Text style={styles.fieldLabel}>📅 Next Follow-up Date</Text>
+      <TouchableOpacity style={styles.dateBtn} onPress={() => setShowPicker(true)}>
+        <Ionicons name="calendar-outline" size={17} color="#94a3b8" />
+        <Text style={[styles.dateBtnText, date && { color: '#f8fafc' }]}>
+          {date ? date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Select Date'}
+        </Text>
+      </TouchableOpacity>
+      <DateField value={date} onChange={setDate} showPicker={showPicker} setShowPicker={setShowPicker} styles={styles} />
+      <Text style={styles.fieldLabel}>🕐 Follow-up Time (HH:MM)</Text>
+      <TextInput style={styles.input} value={time} onChangeText={setTime} placeholder="10:00" placeholderTextColor="#475569" keyboardType="numbers-and-punctuation" />
+    </View>
+  );
+}
+
 export function EditProfileModal({ visible, onClose, lead, destinations, itineraries, onSuccess, styles }: {
   visible: boolean;
   onClose: () => void;
@@ -41,6 +68,7 @@ export function EditProfileModal({ visible, onClose, lead, destinations, itinera
   const [fAdvancePaid, setFAdvancePaid] = useState('');
   const [fPassportNo, setFPassportNo] = useState('');
   const [fPassportName, setFPassportName] = useState('');
+  const [fArrPNR, setFArrPNR] = useState('');
   const [fArrFlightNo, setFArrFlightNo] = useState('');
   const [fArrDepPlace, setFArrDepPlace] = useState('Cochin Airport');
   const [fArrDepDate, setFArrDepDate] = useState('');
@@ -48,6 +76,7 @@ export function EditProfileModal({ visible, onClose, lead, destinations, itinera
   const [fArrArrAirport, setFArrArrAirport] = useState('Denpasar Airport');
   const [fArrArrDate, setFArrArrDate] = useState('');
   const [fArrArrTime, setFArrArrTime] = useState('');
+  const [fDepPNR, setFDepPNR] = useState('');
   const [fDepFlightNo, setFDepFlightNo] = useState('');
   const [fDepDepPlace, setFDepDepPlace] = useState('Denpasar Airport');
   const [fDepDepDate, setFDepDepDate] = useState('');
@@ -72,9 +101,9 @@ export function EditProfileModal({ visible, onClose, lead, destinations, itinera
       setFFollowupStatus(''); setFNextFollowupDate(null); setFNextFollowupTime(''); setFRemarks('');
       setFTotalAmount(''); setFAdvancePaid('');
       setFPassportNo(''); setFPassportName('');
-      setFArrFlightNo(''); setFArrDepPlace('Cochin Airport'); setFArrDepDate(''); setFArrDepTime('');
+      setFArrPNR(''); setFArrFlightNo(''); setFArrDepPlace('Cochin Airport'); setFArrDepDate(''); setFArrDepTime('');
       setFArrArrAirport('Denpasar Airport'); setFArrArrDate(''); setFArrArrTime('');
-      setFDepFlightNo(''); setFDepDepPlace('Denpasar Airport'); setFDepDepDate(''); setFDepDepTime('');
+      setFDepPNR(''); setFDepFlightNo(''); setFDepDepPlace('Denpasar Airport'); setFDepDepDate(''); setFDepDepTime('');
       setFDepArrAirport('Cochin Airport'); setFDepArrDate(''); setFDepArrTime('');
     }
   }, [lead]);
@@ -186,6 +215,7 @@ export function EditProfileModal({ visible, onClose, lead, destinations, itinera
           due_amount: total - advance,
           passport_no: fPassportNo,
           passport_name: fPassportName,
+          arr_pnr: fArrPNR,
           arr_flight_no: fArrFlightNo,
           arr_dep_place: fArrDepPlace,
           arr_dep_date: fArrDepDate || null,
@@ -193,6 +223,7 @@ export function EditProfileModal({ visible, onClose, lead, destinations, itinera
           arr_arr_airport: fArrArrAirport,
           arr_arr_date: fArrArrDate || null,
           arr_arr_time: fArrArrTime || null,
+          dep_pnr: fDepPNR,
           dep_flight_no: fDepFlightNo,
           dep_dep_place: fDepDepPlace,
           dep_dep_date: fDepDepDate || null,
@@ -266,32 +297,7 @@ export function EditProfileModal({ visible, onClose, lead, destinations, itinera
 
   const selectedFollowupMeta = FOLLOWUP_STATUSES.find(s => s.key === fFollowupStatus);
 
-  function FF({ label, value, onChange, placeholder, keyboardType = 'default', autoCapitalize = 'sentences' }: any) {
-    return (
-      <View style={styles.fieldGroup}>
-        <Text style={styles.fieldLabel}>{label}</Text>
-        <TextInput style={styles.input} value={value} onChangeText={onChange} placeholder={placeholder}
-          placeholderTextColor="#475569" keyboardType={keyboardType as any} autoCapitalize={autoCapitalize} />
-      </View>
-    );
-  }
 
-  function NextFollowup({ date, setDate, showPicker, setShowPicker, time, setTime }: any) {
-    return (
-      <View style={{ gap: 8, marginTop: 8 }}>
-        <Text style={styles.fieldLabel}>📅 Next Follow-up Date</Text>
-        <TouchableOpacity style={styles.dateBtn} onPress={() => setShowPicker(true)}>
-          <Ionicons name="calendar-outline" size={17} color="#94a3b8" />
-          <Text style={[styles.dateBtnText, date && { color: '#f8fafc' }]}>
-            {date ? date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Select Date'}
-          </Text>
-        </TouchableOpacity>
-        <DateField value={date} onChange={setDate} showPicker={showPicker} setShowPicker={setShowPicker} styles={styles} />
-        <Text style={styles.fieldLabel}>🕐 Follow-up Time (HH:MM)</Text>
-        <TextInput style={styles.input} value={time} onChangeText={setTime} placeholder="10:00" placeholderTextColor="#475569" keyboardType="numbers-and-punctuation" />
-      </View>
-    );
-  }
 
   return (
     <Modal visible={visible} animationType="slide">
@@ -301,10 +307,10 @@ export function EditProfileModal({ visible, onClose, lead, destinations, itinera
           <TouchableOpacity onPress={onClose}><Ionicons name="close" size={26} color="#94a3b8" /></TouchableOpacity>
         </View>
         <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
-          <FF label="Name" value={fName} onChange={setFName} placeholder="Full Name" />
-          <FF label="Contact No" value={fContact} onChange={setFContact} placeholder="Phone" keyboardType="phone-pad" />
-          <FF label="Email" value={fEmail} onChange={setFEmail} placeholder="email@example.com" keyboardType="email-address" />
-          <FF label="Max Budget" value={fBudget} onChange={setFBudget} placeholder="₹ budget" keyboardType="numeric" />
+          <FF label="Name" value={fName} onChange={setFName} placeholder="Full Name" styles={styles} />
+          <FF label="Contact No" value={fContact} onChange={setFContact} placeholder="Phone" keyboardType="phone-pad" styles={styles} />
+          <FF label="Email" value={fEmail} onChange={setFEmail} placeholder="email@example.com" keyboardType="email-address" styles={styles} />
+          <FF label="Max Budget" value={fBudget} onChange={setFBudget} placeholder="₹ budget" keyboardType="numeric" styles={styles} />
 
           <Text style={styles.fieldLabel}>Travel Date</Text>
           <TouchableOpacity style={styles.dateBtn} onPress={() => setShowDatePicker(true)}>
@@ -384,7 +390,7 @@ export function EditProfileModal({ visible, onClose, lead, destinations, itinera
             <View style={[styles.bookCard, { borderColor: '#6366f155' }]}>
               <Text style={{ color: '#6366f1', fontWeight: '800' }}>Confirm Sending</Text>
               {fItinId ? <Text style={styles.bookGridValue}>✅ {getItinTitle(fItinId)}</Text> : <Text style={{ color: '#ef4444' }}>⚠️ Select itinerary first</Text>}
-              <NextFollowup date={fNextFollowupDate} setDate={setFNextFollowupDate} showPicker={showNextDatePicker} setShowPicker={setShowNextDatePicker} time={fNextFollowupTime} setTime={setFNextFollowupTime} />
+              <NextFollowup date={fNextFollowupDate} setDate={setFNextFollowupDate} showPicker={showNextDatePicker} setShowPicker={setShowNextDatePicker} time={fNextFollowupTime} setTime={setFNextFollowupTime} styles={styles} />
             </View>
           )}
 
@@ -392,19 +398,38 @@ export function EditProfileModal({ visible, onClose, lead, destinations, itinera
             <View style={[styles.bookCard, { borderColor: '#10b98155' }]}>
               <Text style={styles.fieldLabel}>Call Remarks</Text>
               <TextInput style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]} value={fRemarks} onChangeText={setFRemarks} placeholder="Notes..." placeholderTextColor="#475569" multiline />
-              <NextFollowup date={fNextFollowupDate} setDate={setFNextFollowupDate} showPicker={showNextDatePicker} setShowPicker={setShowNextDatePicker} time={fNextFollowupTime} setTime={setFNextFollowupTime} />
+              <NextFollowup date={fNextFollowupDate} setDate={setFNextFollowupDate} showPicker={showNextDatePicker} setShowPicker={setShowNextDatePicker} time={fNextFollowupTime} setTime={setFNextFollowupTime} styles={styles} />
             </View>
           )}
 
           {fFollowupStatus === 'advance_paid' && (
             <View style={[styles.bookCard, { borderColor: '#10b98155' }]}>
               <Text style={styles.bookCardTitle}>💰 Payment Details</Text>
-              <FF label="Total Amount (₹)" value={fTotalAmount} onChange={setFTotalAmount} placeholder="100000" keyboardType="numeric" />
-              <FF label="Advance Paid (₹)" value={fAdvancePaid} onChange={setFAdvancePaid} placeholder="50000" keyboardType="numeric" />
+              <FF label="Total Amount (₹)" value={fTotalAmount} onChange={setFTotalAmount} placeholder="100000" keyboardType="numeric" styles={styles} />
+              <FF label="Advance Paid (₹)" value={fAdvancePaid} onChange={setFAdvancePaid} placeholder="50000" keyboardType="numeric" styles={styles} />
               <View style={[styles.bookRow, { borderBottomWidth: 0 }]}><Text style={styles.bookLabel}>Due Amount</Text><Text style={[styles.bookValue, { color: '#f59e0b', fontSize: 20 }]}>₹{duoAmount ? parseInt(duoAmount).toLocaleString() : '—'}</Text></View>
-              <Text style={styles.bookCardTitle}>🛂 Passport</Text>
-              <FF label="Passport No" value={fPassportNo} onChange={setFPassportNo} placeholder="A1234567" />
-              <FF label="Name" value={fPassportName} onChange={setFPassportName} autoCapitalize="characters" />
+              <Text style={styles.bookCardTitle}>🛂 Passport Details</Text>
+              <FF label="Passport No" value={fPassportNo} onChange={setFPassportNo} placeholder="A1234567" styles={styles} />
+              <FF label="Passport Name" value={fPassportName} onChange={setFPassportName} autoCapitalize="characters" styles={styles} />
+              
+              <Text style={styles.bookCardTitle}>✈️ Flight Details</Text>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <FF label="Arrival PNR" value={fArrPNR} onChange={setFArrPNR} placeholder="PNR" autoCapitalize="characters" styles={styles} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <FF label="Arrival Flight #" value={fArrFlightNo} onChange={setFArrFlightNo} placeholder="UK836" autoCapitalize="characters" styles={styles} />
+                </View>
+              </View>
+              
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <FF label="Departure PNR" value={fDepPNR} onChange={setFDepPNR} placeholder="PNR" autoCapitalize="characters" styles={styles} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <FF label="Departure Flight #" value={fDepFlightNo} onChange={setFDepFlightNo} placeholder="UK837" autoCapitalize="characters" styles={styles} />
+                </View>
+              </View>
             </View>
           )}
 

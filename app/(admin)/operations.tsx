@@ -32,8 +32,9 @@ type ConfirmedBooking = {
   due_amount: number;
   passport_no: string | null;
   passport_name: string | null;
-  pan_no?: string; // New field
-  checklist?: Record<string, boolean>; // New field
+  pan_no?: string;
+  checklist?: Record<string, any>;
+  arr_pnr: string | null;
   arr_flight_no: string | null;
   arr_dep_place: string | null;
   arr_dep_date: string | null;
@@ -41,6 +42,7 @@ type ConfirmedBooking = {
   arr_arr_airport: string | null;
   arr_arr_date: string | null;
   arr_arr_time: string | null;
+  dep_pnr: string | null;
   dep_flight_no: string | null;
   dep_dep_place: string | null;
   dep_dep_date: string | null;
@@ -197,6 +199,7 @@ export default function OperationsScreen() {
         checklist: editingBooking.checklist,
         passport_no: editingBooking.passport_no,
         passport_name: editingBooking.passport_name,
+        arr_pnr: editingBooking.arr_pnr,
         arr_flight_no: editingBooking.arr_flight_no,
         arr_dep_place: editingBooking.arr_dep_place,
         arr_dep_date: editingBooking.arr_dep_date,
@@ -204,6 +207,7 @@ export default function OperationsScreen() {
         arr_arr_airport: editingBooking.arr_arr_airport,
         arr_arr_date: editingBooking.arr_arr_date,
         arr_arr_time: editingBooking.arr_arr_time,
+        dep_pnr: editingBooking.dep_pnr,
         dep_flight_no: editingBooking.dep_flight_no,
         dep_dep_place: editingBooking.dep_dep_place,
         dep_dep_date: editingBooking.dep_dep_date,
@@ -346,14 +350,14 @@ export default function OperationsScreen() {
             </thead>
             <tbody>
               <tr>
-                <td><div class="bold">${booking.arr_flight_no || '—'}</div></td>
+                <td><div class="bold">${booking.arr_flight_no || '—'}<br/><span style="font-size: 11px; color: #64748b;">PNR: ${booking.arr_pnr || '—'}</span></div></td>
                 <td><span style="color: #10b981; font-weight: 800;">ARRIVAL</span></td>
                 <td>${booking.arr_dep_date}<br/><span style="font-size: 11px; font-weight: 700;">${booking.arr_dep_time}</span></td>
                 <td>${booking.arr_arr_date}<br/><span style="font-size: 11px; font-weight: 700;">${booking.arr_arr_time}</span></td>
                 <td><div class="bold">${booking.arr_dep_place} ✈ ${booking.arr_arr_airport}</div></td>
               </tr>
               <tr>
-                <td><div class="bold">${booking.dep_flight_no || '—'}</div></td>
+                <td><div class="bold">${booking.dep_flight_no || '—'}<br/><span style="font-size: 11px; color: #64748b;">PNR: ${booking.dep_pnr || '—'}</span></div></td>
                 <td><span style="color: #3b82f6; font-weight: 800;">DEPARTURE</span></td>
                 <td>${booking.dep_dep_date}<br/><span style="font-size: 11px; font-weight: 700;">${booking.dep_dep_time}</span></td>
                 <td>${booking.dep_arr_date}<br/><span style="font-size: 11px; font-weight: 700;">${booking.dep_arr_time}</span></td>
@@ -526,11 +530,18 @@ export default function OperationsScreen() {
         }
       } else {
         const { uri } = await Print.printToFileAsync({ html });
-        const safeName = lead.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-        const newUri = FileSystem.cacheDirectory + `${safeName}_manifest.pdf`;
-        await FileSystem.moveAsync({ from: uri, to: newUri });
+        let finalUri = uri;
         
-        await Sharing.shareAsync(newUri, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: action === 'whatsapp' ? 'Share Manifest via WhatsApp' : 'Save PDF Manifest' });
+        try {
+          const safeName = (lead.name || 'guest').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+          const targetUri = `${FileSystem.cacheDirectory}${safeName}_manifest.pdf`;
+          await FileSystem.copyAsync({ from: uri, to: targetUri });
+          finalUri = targetUri;
+        } catch (renameErr) {
+          console.error('Renaming failed, using default URI', renameErr);
+        }
+        
+        await Sharing.shareAsync(finalUri, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: action === 'whatsapp' ? 'Share Manifest via WhatsApp' : 'Save PDF Manifest' });
       }
       const newChecklist = { ...(booking.checklist || {}), pdf: true };
       await supabase.from('confirmed_bookings').update({ checklist: newChecklist }).eq('id', booking.id);
@@ -667,8 +678,10 @@ export default function OperationsScreen() {
                       )}
                       {item.key === 'flights' && (
                         <View style={{ gap: 10 }}>
-                          <Text style={s.subSectionTitle}>Arrival Flight (To Bali)</Text>
-                          <FormField label="Flight No" value={editingBooking?.arr_flight_no || ''} onChange={v => setEditingBooking(p => p ? {...p, arr_flight_no: v} : null)} />
+                        <View style={s.rowTwo}>
+                          <View style={{ flex: 1 }}><FormField label="Arrival PNR" value={editingBooking?.arr_pnr || ''} onChange={v => setEditingBooking(p => p ? {...p, arr_pnr: v} : null)} placeholder="PNR" /></View>
+                          <View style={{ flex: 1 }}><FormField label="Flight No" value={editingBooking?.arr_flight_no || ''} onChange={v => setEditingBooking(p => p ? {...p, arr_flight_no: v} : null)} placeholder="Flight No" /></View>
+                        </View>
                           <View style={s.rowTwo}>
                             <View style={{ flex: 1 }}><FormField label="From" value={editingBooking?.arr_dep_place || 'Cochin Airport'} onChange={v => setEditingBooking(p => p ? {...p, arr_dep_place: v} : null)} /></View>
                             <View style={{ flex: 1 }}><FormField label="To" value={editingBooking?.arr_arr_airport || 'Denpasar Airport'} onChange={v => setEditingBooking(p => p ? {...p, arr_arr_airport: v} : null)} /></View>
@@ -682,8 +695,10 @@ export default function OperationsScreen() {
                             <View style={{ flex: 1 }}><FormField label="Arr Time" value={editingBooking?.arr_arr_time || ''} onChange={v => setEditingBooking(p => p ? {...p, arr_arr_time: v} : null)} placeholder="HH:MM" /></View>
                           </View>
 
-                          <Text style={[s.subSectionTitle, { marginTop: 15 }]}>Departure Flight (Return)</Text>
-                          <FormField label="Flight No" value={editingBooking?.dep_flight_no || ''} onChange={v => setEditingBooking(p => p ? {...p, dep_flight_no: v} : null)} />
+                        <View style={s.rowTwo}>
+                          <View style={{ flex: 1 }}><FormField label="Departure PNR" value={editingBooking?.dep_pnr || ''} onChange={v => setEditingBooking(p => p ? {...p, dep_pnr: v} : null)} placeholder="PNR" /></View>
+                          <View style={{ flex: 1 }}><FormField label="Flight No" value={editingBooking?.dep_flight_no || ''} onChange={v => setEditingBooking(p => p ? {...p, dep_flight_no: v} : null)} placeholder="Flight No" /></View>
+                        </View>
                           <View style={s.rowTwo}>
                             <View style={{ flex: 1 }}><FormField label="From" value={editingBooking?.dep_dep_place || 'Denpasar Airport'} onChange={v => setEditingBooking(p => p ? {...p, dep_dep_place: v} : null)} /></View>
                             <View style={{ flex: 1 }}><FormField label="To" value={editingBooking?.dep_arr_airport || 'Cochin Airport'} onChange={v => setEditingBooking(p => p ? {...p, dep_arr_airport: v} : null)} /></View>
