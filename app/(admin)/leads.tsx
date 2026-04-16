@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/utils/supabase';
+import { STATUS_COLORS, FOLLOWUP_STATUSES, FUP_COLORS, FUP_LABELS, OPTION_META } from '@/lib/salesConstants';
 
 type Lead = {
   id: string;
@@ -16,22 +17,26 @@ type Lead = {
   created_at: string;
   returned_to_admin: boolean;
   followup_status: string | null;
+  itinerary_id: string | null;
+  itinerary_option: string | null;
+  itinerary_history: any[] | null;
+  call_remarks: string | null;
+  assigned_to_profile?: { name: string | null };
 };
+
+type Itinerary = { id: string; title: string; pricing_data: any; description?: string };
 
 type Profile = { id: string; name: string | null };
 
-const STATUS_COLORS: Record<string, string> = {
-  New: '#6366f1',
-  Contacted: '#f59e0b',
-  Converted: '#10b981',
-  Lost: '#ef4444',
-};
+// (Remove old STATUS_COLORS as it's now imported)
 
 export default function LeadsScreen() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [returnedLeads, setReturnedLeads] = useState<Lead[]>([]);
   const [salespersons, setSalespersons] = useState<Profile[]>([]);
+  const [itineraries, setItineraries] = useState<Itinerary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
   const [reassignModal, setReassignModal] = useState(false);
   const [reassignLeadId, setReassignLeadId] = useState('');
@@ -44,19 +49,33 @@ export default function LeadsScreen() {
   const [assignedTo, setAssignedTo] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Detail Modal state
+  const [detailModal, setDetailModal] = useState(false);
+  const [viewLead, setViewLead] = useState<Lead | null>(null);
+  const [callHistory, setCallHistory] = useState<any[]>([]);
+  const [viewItinId, setViewItinId] = useState<string | null>(null);
+  const [viewItinOption, setViewItinOption] = useState<string | null>(null);
+  const [isViewingCurrent, setIsViewingCurrent] = useState(false);
+
   useEffect(() => {
     fetchLeads();
     fetchSalespersons();
+    fetchItineraries();
   }, []);
+
+  async function fetchItineraries() {
+    const { data } = await supabase.from('itineraries').select('*');
+    setItineraries(data ?? []);
+  }
 
   async function fetchLeads() {
     setLoading(true);
     const [all, returned] = await Promise.all([
-      supabase.from('leads').select('*').eq('returned_to_admin', false).order('created_at', { ascending: false }),
-      supabase.from('leads').select('*').eq('returned_to_admin', true).order('created_at', { ascending: false }),
+      supabase.from('leads').select('*, assigned_to_profile:profiles(name)').eq('returned_to_admin', false).order('created_at', { ascending: false }),
+      supabase.from('leads').select('*, assigned_to_profile:profiles(name)').eq('returned_to_admin', true).order('created_at', { ascending: false }),
     ]);
-    setLeads(all.data ?? []);
-    setReturnedLeads(returned.data ?? []);
+    setLeads(all.data as any[] ?? []);
+    setReturnedLeads(returned.data as any[] ?? []);
     setLoading(false);
   }
 
@@ -99,10 +118,36 @@ export default function LeadsScreen() {
 
   function openModal() { resetForm(); setModalVisible(true); }
 
+  async function openDetailModal(lead: Lead) {
+    setViewLead(lead);
+    setDetailModal(true);
+    const { data } = await supabase
+      .from('call_logs')
+      .select('*, salesperson:profiles(name)')
+      .eq('lead_id', lead.id)
+      .order('called_at', { ascending: false });
+    setCallHistory(data ?? []);
+  }
+
+  const filteredLeads = leads.filter(l => 
+    l.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    l.contact_no.includes(searchQuery)
+  );
+  
+  const filteredReturned = returnedLeads.filter(l => 
+    l.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    l.contact_no.includes(searchQuery)
+  );
+
   const renderLead = ({ item }: { item: Lead }) => (
-    <View style={styles.card}>
+    <TouchableOpacity activeOpacity={0.8} onPress={() => openDetailModal(item)} style={styles.card}>
       <View style={styles.cardHeader}>
-        <Text style={styles.leadName}>{item.name}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.leadName}>{item.name}</Text>
+          {item.assigned_to_profile?.name && (
+            <Text style={{ color: '#6366f1', fontSize: 11, fontWeight: '700' }}>👤 {item.assigned_to_profile.name}</Text>
+          )}
+        </View>
         <View style={[styles.statusBadge, { backgroundColor: (STATUS_COLORS[item.status] ?? '#6366f1') + '33' }]}>
           <Text style={[styles.statusText, { color: STATUS_COLORS[item.status] ?? '#6366f1' }]}>{item.status}</Text>
         </View>
@@ -115,7 +160,7 @@ export default function LeadsScreen() {
         <Ionicons name="map-outline" size={14} color="#94a3b8" />
         <Text style={styles.cardMeta}>{item.destination}</Text>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   return (
@@ -124,15 +169,32 @@ export default function LeadsScreen() {
         <ActivityIndicator color="#6366f1" style={{ marginTop: 40 }} />
       ) : (
         <ScrollView contentContainerStyle={styles.list}>
+          {/* Search Bar */}
+          <View style={styles.searchRow}>
+            <Ionicons name="search" size={18} color="#475569" />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search leads by name or number..."
+              placeholderTextColor="#475569"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery ? (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <Ionicons name="close-circle" size={18} color="#475569" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
           {/* ── Return from Sale section ───────────────────────── */}
-          {returnedLeads.length > 0 && (
+          {filteredReturned.length > 0 && (
             <View style={styles.returnSection}>
               <View style={styles.returnHeader}>
                 <Ionicons name="arrow-undo-outline" size={16} color="#f59e0b" />
-                <Text style={styles.returnHeaderText}>↩ Return from Sale ({returnedLeads.length})</Text>
+                <Text style={styles.returnHeaderText}>↩ Return from Sale ({filteredReturned.length})</Text>
               </View>
-              {returnedLeads.map(item => (
-                <View key={item.id} style={styles.returnCard}>
+              {filteredReturned.map(item => (
+                <TouchableOpacity key={item.id} activeOpacity={0.8} onPress={() => openDetailModal(item)} style={styles.returnCard}>
                   <View style={styles.returnCardTop}>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.leadName}>{item.name}</Text>
@@ -148,15 +210,15 @@ export default function LeadsScreen() {
                       <Text style={styles.reassignBtnText}>Reassign</Text>
                     </TouchableOpacity>
                   </View>
-                </View>
+                </TouchableOpacity>
               ))}
             </View>
           )}
 
           {/* ── Main leads list ────────────────────────────────── */}
-          {leads.map(item => renderLead({ item }))}
-          {leads.length === 0 && returnedLeads.length === 0 && (
-            <Text style={styles.empty}>No leads yet. Add your first lead!</Text>
+          {filteredLeads.map(item => renderLead({ item }))}
+          {filteredLeads.length === 0 && filteredReturned.length === 0 && (
+            <Text style={styles.empty}>No leads found matching your search.</Text>
           )}
         </ScrollView>
       )}
@@ -222,6 +284,164 @@ export default function LeadsScreen() {
             <TouchableOpacity style={styles.saveBtn} onPress={handleCreate} disabled={saving}>
               {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Create Lead</Text>}
             </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* ── Lead Details Modal ──────────────────────────────────────────────── */}
+      <Modal visible={detailModal} animationType="slide" presentationStyle="pageSheet">
+        <View style={styles.modal}>
+          <View style={styles.modalHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.modalTitle}>{viewLead?.name}</Text>
+              <Text style={styles.modalSub}>{viewLead?.contact_no}</Text>
+            </View>
+            <TouchableOpacity onPress={() => setDetailModal(false)} style={{ padding: 4 }}>
+              <Ionicons name="close" size={26} color="#94a3b8" />
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={styles.formContent}>
+            <View style={styles.detailRow}>
+              <Ionicons name="map-outline" size={16} color="#94a3b8" />
+              <Text style={styles.detailText}>{viewLead?.destination}</Text>
+            </View>
+            
+            {viewLead?.followup_status && (
+              <View style={styles.detailRow}>
+                <Ionicons 
+                  name={FOLLOWUP_STATUSES.find(f => f.key === viewLead.followup_status)?.icon as any ?? 'flag-outline'} 
+                  size={16} 
+                  color={FUP_COLORS[viewLead.followup_status] ?? '#6366f1'} 
+                />
+                <Text style={[styles.detailText, { color: FUP_COLORS[viewLead.followup_status] ?? '#6366f1', fontWeight: '700' }]}>
+                  {FUP_LABELS[viewLead.followup_status] ?? viewLead.followup_status}
+                </Text>
+              </View>
+            )}
+
+            {viewLead?.assigned_to_profile?.name && (
+              <View style={styles.detailRow}>
+                <Ionicons name="person-outline" size={16} color="#6366f1" />
+                <Text style={[styles.detailText, { color: '#6366f1', fontWeight: '600' }]}>Assigned to: {viewLead.assigned_to_profile.name}</Text>
+              </View>
+            )}
+
+            {viewLead?.call_remarks && (
+              <View style={styles.box}>
+                <Text style={styles.subHeading}>💬 Call Remarks History</Text>
+                <Text style={{ color: '#cbd5e1', fontSize: 13, fontStyle: 'italic', marginTop: 4 }}>{viewLead.call_remarks}</Text>
+              </View>
+            )}
+
+            {(viewLead?.itinerary_id || (viewLead?.itinerary_history && viewLead.itinerary_history.length > 0)) && (
+              <View style={styles.box}>
+                <Text style={styles.subHeading}>🗺️ Itinerary History</Text>
+                {viewLead.itinerary_id && (
+                  <TouchableOpacity 
+                    onPress={() => { setViewItinId(viewLead.itinerary_id!); setViewItinOption(viewLead.itinerary_option); setIsViewingCurrent(true); }} 
+                    style={[styles.detailRow, { marginTop: 8 }]}
+                  >
+                    <Ionicons name="location" size={14} color="#10b981" />
+                    <Text style={[styles.detailText, { color: '#10b981' }]}>
+                      Current: {itineraries.find(i => i.id === viewLead.itinerary_id)?.title}
+                      {viewLead.itinerary_option && ` (${OPTION_META[viewLead.itinerary_option]?.label ?? viewLead.itinerary_option})`}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                {viewLead.itinerary_history?.map((h, i) => (
+                  <TouchableOpacity key={i} onPress={() => { setViewItinId(h.id); setViewItinOption(h.option ?? null); setIsViewingCurrent(false); }} style={[styles.detailRow, { marginTop: 10 }]}>
+                    <Ionicons name="archive-outline" size={14} color="#64748b" />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.detailText}>Previous: {h.title}</Text>
+                      {h.option_label && <Text style={{ color: '#64748b', fontSize: 11 }}>Option: {h.option_label}</Text>}
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            <View style={[styles.box, { marginTop: 8 }]}>
+              <Text style={styles.subHeading}>📞 Call Logs ({callHistory.length})</Text>
+              {callHistory.length === 0 ? (
+                <Text style={{ color: '#475569', fontSize: 13, marginTop: 10 }}>No calls logged yet.</Text>
+              ) : (
+                callHistory.map(ch => (
+                  <View key={ch.id} style={styles.callLogBtn}>
+                    <Ionicons name="call" size={14} color="#64748b" />
+                    <View style={{ flex: 1 }}>
+                       <Text style={{ color: '#cbd5e1', fontSize: 14 }}>
+                        {new Date(ch.called_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </Text>
+                      <Text style={{ color: '#6366f1', fontSize: 11 }}>By {ch.salesperson?.name || 'Unknown'}</Text>
+                    </View>
+                    <Text style={{ color: '#f59e0b', fontSize: 13, fontWeight: '700' }}>
+                      {Math.floor(ch.duration_seconds / 60)}m {ch.duration_seconds % 60}s
+                    </Text>
+                  </View>
+                ))
+              )}
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* ── View Full Itinerary Modal ────────────────────────────────────── */}
+      <Modal visible={!!viewItinId} animationType="slide" presentationStyle="pageSheet">
+        <View style={styles.modal}>
+          <View style={styles.modalHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.modalTitle}>{itineraries.find(i => i.id === viewItinId)?.title}</Text>
+              <Text style={styles.modalSub}>Itinerary Details</Text>
+            </View>
+            <TouchableOpacity onPress={() => { setViewItinId(null); setViewItinOption(null); setIsViewingCurrent(false); }} style={{ padding: 4 }}>
+              <Ionicons name="close" size={26} color="#94a3b8" />
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={styles.formContent}>
+            {(() => {
+              const itin = itineraries.find(i => i.id === viewItinId);
+              if (!itin || !itin.pricing_data) return null;
+              return (
+                <View style={{ gap: 12 }}>
+                  {!!itin.description && (
+                    <Text style={{ color: '#cbd5e1', fontSize: 13, lineHeight: 20, marginBottom: 8 }}>
+                      {itin.description}
+                    </Text>
+                  )}
+                  {(Object.keys(itin.pricing_data) as string[])
+                    .filter(k => {
+                      const opt = isViewingCurrent ? (viewItinOption || viewLead?.itinerary_option) : viewItinOption;
+                      return (opt && opt.trim() !== '') ? k === opt : true;
+                    })
+                    .map(k => {
+                      const data = itin.pricing_data[k] as any;
+                      const meta = OPTION_META[k];
+                      if (!data || !meta) return null;
+                      return (
+                        <View key={k} style={{ borderWidth: 1, borderColor: meta.color + '44', borderRadius: 12, padding: 12, backgroundColor: '#0f172a' }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#1e293b', paddingBottom: 8, marginBottom: 8 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Ionicons name={meta.icon as any} size={16} color={meta.color} />
+                              <Text style={{ color: meta.color, fontSize: 13, fontWeight: '700' }}>{meta.label}</Text>
+                            </View>
+                            {data.price ? (
+                              <Text style={{ color: '#10b981', fontSize: 15, fontWeight: '800' }}>₹{data.price.toLocaleString()}</Text>
+                            ) : null}
+                          </View>
+                          {data.inclusions?.length > 0 && (
+                            <View style={{ marginBottom: 6 }}>
+                              <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700', marginBottom: 2 }}>INCLUSIONS</Text>
+                              {data.inclusions.map((inc: string, i: number) => (
+                                <Text key={`inc-${i}`} style={{ color: '#cbd5e1', fontSize: 12, marginBottom: 1 }}>• {inc}</Text>
+                              ))}
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })}
+                </View>
+              );
+            })()}
           </ScrollView>
         </View>
       </Modal>
@@ -291,4 +511,13 @@ const styles = StyleSheet.create({
   chipTextActive: { color: '#fff' },
   saveBtn: { backgroundColor: '#6366f1', borderRadius: 12, paddingVertical: 15, alignItems: 'center', marginTop: 8 },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  // Lead Details
+  modalSub: { color: '#10b981', fontSize: 13, fontWeight: '600', marginTop: 2 },
+  detailRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  detailText: { color: '#94a3b8', fontSize: 15 },
+  box: { borderWidth: 1.5, borderRadius: 14, padding: 14, gap: 10, backgroundColor: '#1e293b22', borderColor: '#334155' },
+  subHeading: { color: '#cbd5e1', fontSize: 13, fontWeight: '700', marginTop: 4 },
+  callLogBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#0f172a', padding: 12, borderRadius: 10, marginTop: 10, borderWidth: 1, borderColor: '#334155' },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#1e293b', borderRadius: 12, paddingHorizontal: 12, height: 48, marginBottom: 16, borderWidth: 1, borderColor: '#334155' },
+  searchInput: { flex: 1, color: '#f8fafc', fontSize: 14 },
 });

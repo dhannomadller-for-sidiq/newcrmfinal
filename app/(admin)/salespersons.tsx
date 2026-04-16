@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/utils/supabase';
+import { STATUS_COLORS, FOLLOWUP_STATUSES, FUP_COLORS, FUP_LABELS, OPTION_META } from '@/lib/salesConstants';
 
 type TeamMember = { 
   id: string; 
@@ -15,6 +16,23 @@ type TeamMember = {
   role: 'sale' | 'operations' | 'finance' 
 };
 type CallStat = { total: number; totalDuration: number; today: number };
+
+type Lead = {
+  id: string;
+  name: string;
+  contact_no: string;
+  destination: string;
+  status: string;
+  assigned_to: string | null;
+  created_at: string;
+  followup_status: string | null;
+  itinerary_id: string | null;
+  itinerary_option: string | null;
+  itinerary_history: any[] | null;
+  call_remarks: string | null;
+};
+
+type Itinerary = { id: string; title: string; pricing_data: any; description?: string };
 
 const ROLE_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
   sale: { label: 'Sales', color: '#6366f1', icon: 'trending-up' },
@@ -36,7 +54,31 @@ export default function SalespersonsScreen() {
   const [fRole, setFRole] = useState<'sale' | 'operations' | 'finance'>('sale');
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { fetchPeople(); fetchCallStats(); }, []);
+  // Salesperson Drill-down
+  const [personModal, setPersonModal] = useState(false);
+  const [selectedPerson, setSelectedPerson] = useState<TeamMember | null>(null);
+  const [personLeads, setPersonLeads] = useState<Lead[]>([]);
+  const [fetchingLeads, setFetchingLeads] = useState(false);
+
+  // Lead Detail (Reused pattern)
+  const [itineraries, setItineraries] = useState<Itinerary[]>([]);
+  const [detailModal, setDetailModal] = useState(false);
+  const [viewLead, setViewLead] = useState<Lead | null>(null);
+  const [callHistory, setCallHistory] = useState<any[]>([]);
+  const [viewItinId, setViewItinId] = useState<string | null>(null);
+  const [viewItinOption, setViewItinOption] = useState<string | null>(null);
+  const [isViewingCurrent, setIsViewingCurrent] = useState(false);
+
+  useEffect(() => { 
+    fetchPeople(); 
+    fetchCallStats(); 
+    fetchItineraries();
+  }, []);
+
+  async function fetchItineraries() {
+    const { data } = await supabase.from('itineraries').select('*');
+    setItineraries(data ?? []);
+  }
 
   async function fetchPeople() {
     setLoading(true);
@@ -102,17 +144,46 @@ export default function SalespersonsScreen() {
     Alert.alert('Success', `${name} has been added to the ${ROLE_CONFIG[fRole].label} Team.`);
   }
 
+  async function openPersonDetails(person: TeamMember) {
+    setSelectedPerson(person);
+    setPersonModal(true);
+    setFetchingLeads(true);
+    const { data } = await supabase
+      .from('leads')
+      .select('*')
+      .eq('assigned_to', person.id)
+      .order('created_at', { ascending: false });
+    setPersonLeads(data ?? []);
+    setFetchingLeads(false);
+  }
+
+  async function openLeadDetail(lead: Lead) {
+    setViewLead(lead);
+    setDetailModal(true);
+    const { data } = await supabase
+      .from('call_logs')
+      .select('*, salesperson:profiles(name)')
+      .eq('lead_id', lead.id)
+      .order('called_at', { ascending: false });
+    setCallHistory(data ?? []);
+  }
+
   function resetForm() {
     setName(''); setEmail(''); setPhone(''); setDesignation(''); setPassword(''); setFRole('sale');
   }
 
   const renderPerson = ({ item }: { item: TeamMember }) => {
     const stat = callStats[item.id];
-    const totalMins = stat ? Math.floor(stat.totalDuration / 60) : 0;
+    let durationText = '0m';
+    if (stat) {
+      const h = Math.floor(stat.totalDuration / 3600);
+      const m = Math.floor((stat.totalDuration % 3600) / 60);
+      durationText = h > 0 ? `${h}h ${m}m` : `${m}m`;
+    }
     const role = ROLE_CONFIG[item.role] || ROLE_CONFIG.sale;
 
     return (
-      <View style={styles.card}>
+      <TouchableOpacity activeOpacity={0.8} onPress={() => openPersonDetails(item)} style={styles.card}>
         <View style={[styles.avatar, { backgroundColor: role.color }]}>
           <Text style={styles.avatarText}>{(item.name ?? '?')[0].toUpperCase()}</Text>
         </View>
@@ -139,7 +210,7 @@ export default function SalespersonsScreen() {
               </View>
               <View style={styles.statBadge}>
                 <Ionicons name="time-outline" size={12} color="#f59e0b" />
-                <Text style={styles.statText}>{totalMins}m total</Text>
+                <Text style={styles.statText}>{durationText} total</Text>
               </View>
               <View style={[styles.statBadge, { backgroundColor: '#10b98122' }]}>
                 <Ionicons name="today-outline" size={12} color="#10b981" />
@@ -148,7 +219,7 @@ export default function SalespersonsScreen() {
             </View>
           )}
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -205,6 +276,93 @@ export default function SalespersonsScreen() {
           </ScrollView>
         </View>
       </Modal>
+
+      {/* ── Salesperson Leads Modal ─────────────────────────────────────── */}
+      <Modal visible={personModal} animationType="slide" presentationStyle="pageSheet">
+        <View style={styles.modal}>
+          <View style={styles.modalHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.modalTitle}>{selectedPerson?.name}</Text>
+              <Text style={styles.modalSub}>Assigned Leads ({personLeads.length})</Text>
+            </View>
+            <TouchableOpacity onPress={() => setPersonModal(false)} style={{ padding: 4 }}>
+              <Ionicons name="close" size={26} color="#94a3b8" />
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={styles.formContent}>
+            {fetchingLeads ? (
+              <ActivityIndicator color="#6366f1" style={{ marginTop: 20 }} />
+            ) : personLeads.length === 0 ? (
+              <Text style={styles.empty}>No leads assigned to this person yet.</Text>
+            ) : (
+              personLeads.map(lead => (
+                <TouchableOpacity key={lead.id} style={styles.leadItemCard} onPress={() => openLeadDetail(lead)}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.leadItemName}>{lead.name}</Text>
+                    <Text style={styles.leadItemMeta}>{lead.contact_no} • {lead.destination}</Text>
+                  </View>
+                  <View style={[styles.statusBadgeSmall, { backgroundColor: (STATUS_COLORS[lead.status] ?? '#6366f1') + '22' }]}>
+                    <Text style={[styles.statusTextSmall, { color: STATUS_COLORS[lead.status] ?? '#6366f1' }]}>{lead.status}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#475569" />
+                </TouchableOpacity>
+              ))
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* ── Lead Details Modal (Reused) ──────────────────────────────────── */}
+      <Modal visible={detailModal} animationType="slide" presentationStyle="pageSheet">
+        <View style={styles.modal}>
+          <View style={styles.modalHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.modalTitle}>{viewLead?.name}</Text>
+              <Text style={styles.modalSub}>{viewLead?.contact_no}</Text>
+            </View>
+            <TouchableOpacity onPress={() => setDetailModal(false)} style={{ padding: 4 }}>
+              <Ionicons name="close" size={26} color="#94a3b8" />
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={styles.formContent}>
+            <View style={styles.detailRow}>
+              <Ionicons name="map-outline" size={16} color="#94a3b8" />
+              <Text style={styles.detailText}>{viewLead?.destination}</Text>
+            </View>
+            {viewLead?.followup_status && (
+              <View style={styles.detailRow}>
+                <Ionicons name={FOLLOWUP_STATUSES.find(f => f.key === viewLead.followup_status)?.icon as any ?? 'flag-outline'} size={16} color={FUP_COLORS[viewLead.followup_status] ?? '#6366f1'} />
+                <Text style={[styles.detailText, { color: FUP_COLORS[viewLead.followup_status] ?? '#6366f1', fontWeight: '700' }]}>
+                  {FUP_LABELS[viewLead.followup_status] ?? viewLead.followup_status}
+                </Text>
+              </View>
+            )}
+            {viewLead?.call_remarks && (
+              <View style={styles.box}>
+                <Text style={styles.subHeading}>💬 Call Remarks History</Text>
+                <Text style={{ color: '#cbd5e1', fontSize: 13, fontStyle: 'italic', marginTop: 4 }}>{viewLead.call_remarks}</Text>
+              </View>
+            )}
+            <View style={[styles.box, { marginTop: 8 }]}>
+              <Text style={styles.subHeading}>📞 Call Logs ({callHistory.length})</Text>
+              {callHistory.map(ch => (
+                 <View key={ch.id} style={styles.callLogBtn}>
+                   <Ionicons name="call" size={14} color="#64748b" />
+                   <View style={{ flex: 1 }}>
+                      <Text style={{ color: '#cbd5e1', fontSize: 13 }}>
+                       {new Date(ch.called_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                     </Text>
+                     <Text style={{ color: '#6366f1', fontSize: 10 }}>By {ch.salesperson?.name || 'Unknown'}</Text>
+                   </View>
+                   <Text style={{ color: '#f59e0b', fontSize: 12, fontWeight: '700' }}>
+                     {Math.floor(ch.duration_seconds / 60)}m {ch.duration_seconds % 60}s
+                   </Text>
+                 </View>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -257,4 +415,16 @@ const styles = S.create({
   roleText: { fontSize: 9, fontWeight: '900' },
   roleChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: '#334155', backgroundColor: '#1e293b' },
   roleChipText: { color: '#94a3b8', fontSize: 13, fontWeight: '700' },
+  // Drill-down styles
+  modalSub: { color: '#10b981', fontSize: 13, fontWeight: '600', marginTop: 2 },
+  leadItemCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1e293b', borderRadius: 12, padding: 14, marginBottom: 8, gap: 12, borderWidth: 1, borderColor: '#334155' },
+  leadItemName: { color: '#f8fafc', fontSize: 15, fontWeight: '700' },
+  leadItemMeta: { color: '#94a3b8', fontSize: 12, marginTop: 2 },
+  statusBadgeSmall: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12 },
+  statusTextSmall: { fontSize: 10, fontWeight: '800' },
+  detailRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  detailText: { color: '#94a3b8', fontSize: 15 },
+  box: { borderWidth: 1.5, borderRadius: 14, padding: 14, gap: 10, backgroundColor: '#1e293b22', borderColor: '#334155' },
+  subHeading: { color: '#cbd5e1', fontSize: 13, fontWeight: '700', marginTop: 4 },
+  callLogBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#0f172a', padding: 10, borderRadius: 8, marginTop: 8, borderWidth: 1, borderColor: '#334155' },
 });

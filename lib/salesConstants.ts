@@ -45,3 +45,6 @@ export const FOLLOWUP_STATUSES = [
   { key: 'advance_paid',         label: '5. Advance Paid & Confirmed',    icon: 'checkmark-circle-outline',  color: '#10b981' },
   { key: 'dead',                 label: '6. Dead Lead',                   icon: 'skull-outline',             color: '#ef4444' },
 ];
+
+export const FUP_COLORS: Record<string, string> = FOLLOWUP_STATUSES.reduce((acc, curr) => ({ ...acc, [curr.key]: curr.color }), {});
+export const FUP_LABELS: Record<string, string> = FOLLOWUP_STATUSES.reduce((acc, curr) => ({ ...acc, [curr.key]: curr.label.split('. ')[1] || curr.label }), {});
