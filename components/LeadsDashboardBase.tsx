@@ -1,43 +1,52 @@
-import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Linking, Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import {
+  View, Text, StyleSheet, FlatList, TouchableOpacity,
+  ActivityIndicator, Linking, Alert, StatusBar, Dimensions,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/utils/supabase';
 import { useSalesLeads, TabType } from '@/hooks/useSalesLeads';
-import { Lead, Destination, Itinerary, STATUS_COLORS } from '@/lib/salesConstants';
+import { Lead, Destination, Itinerary, STATUS_COLORS, OPTION_META } from '@/lib/salesConstants';
+import { generatePaymentBill } from '@/utils/billGenerator';
 import { AddLeadModal } from './AddLeadModal';
 import { EditProfileModal } from './EditProfileModal';
 import { BookingDetailModal } from './BookingDetailModal';
+import { C, R, S } from '@/lib/theme';
 
-export function LeadsDashboardBase({ 
-  tabType, 
-  title,
-  showAdd = false 
-}: { 
-  tabType: TabType; 
-  title: string;
-  showAdd?: boolean;
+const { width: W } = Dimensions.get('window');
+
+const STATUS_BG: Record<string, string> = {
+  New:       C.blueLight,
+  Contacted: C.amberLight,
+  Converted: C.greenLight,
+  Lost:      C.redLight,
+  Allocated: C.purpleLight,
+};
+
+export function LeadsDashboardBase({
+  tabType, title, showAdd = false
+}: {
+  tabType: TabType; title: string; showAdd?: boolean;
 }) {
   const { leads, loading, refresh } = useSalesLeads(tabType);
   const [destinations, setDestinations] = useState<Destination[]>([]);
-  const [itineraries, setItineraries] = useState<Itinerary[]>([]);
-  
-  // Modal states
-  const [addModal, setAddModal] = useState(false);
+  const [itineraries,  setItineraries]  = useState<Itinerary[]>([]);
+  const [addModal,     setAddModal]     = useState(false);
   const [profileModal, setProfileModal] = useState(false);
   const [bookingModal, setBookingModal] = useState(false);
-  const [activeLead, setActiveLead] = useState<Lead | null>(null);
-  const [bookingData, setBookingData] = useState<any>(null);
-  const [allBookings, setAllBookings] = useState<Record<string, any>>({});
+  const [activeLead,   setActiveLead]   = useState<Lead | null>(null);
+  const [bookingData,  setBookingData]  = useState<any>(null);
+  const [allBookings,  setAllBookings]  = useState<Record<string, any>>({});
+  const [generatingBill, setGeneratingBill] = useState(false);
 
   useEffect(() => {
     async function fetchMeta() {
       const [dest, itin] = await Promise.all([
         supabase.from('destinations').select('id, name').order('name'),
-        supabase.from('itineraries').select('id, title, description, destination_id, pricing_data').order('title'),
+        supabase.from('itineraries').select('id, title, description, important_notes, destination_id, pricing_data').order('title'),
       ]);
       setDestinations(dest.data ?? []);
       setItineraries(itin.data ?? []);
-
       if (leads.length > 0) {
         const { data: bData } = await supabase.from('confirmed_bookings').select('*').in('lead_id', leads.map(l => l.id));
         const bMap: Record<string, any> = {};
@@ -50,222 +59,481 @@ export function LeadsDashboardBase({
 
   const handleCall = (lead: Lead) => {
     Linking.openURL(`tel:${lead.contact_no}`).catch(() => {});
-    setTimeout(() => {
-      setActiveLead(lead);
-      setProfileModal(true);
-    }, 800);
+    setTimeout(() => { setActiveLead(lead); setProfileModal(true); }, 800);
   };
 
   const handleWhatsApp = (lead: Lead) => {
     const cleanPhone = lead.contact_no.replace(/[^0-9]/g, '');
     const url = `whatsapp://send?phone=${cleanPhone}`;
     Linking.canOpenURL(url).then(supported => {
-      if (supported) {
-        return Linking.openURL(url);
-      } else {
-        return Linking.openURL(`https://wa.me/${cleanPhone}`);
-      }
+      Linking.openURL(supported ? url : `https://wa.me/${cleanPhone}`);
     });
   };
 
   const openBookingDetails = async (lead: Lead) => {
     setActiveLead(lead);
-    const { data, error } = await supabase
-      .from('confirmed_bookings')
-      .select('*')
-      .eq('lead_id', lead.id)
-      .single();
-    
-    if (error) {
-      Alert.alert('Error', 'Booking data not found.');
-      return;
-    }
+    const { data, error } = await supabase.from('confirmed_bookings').select('*').eq('lead_id', lead.id).maybeSingle();
+    if (error) { Alert.alert('Error', 'Failed to fetch booking data: ' + error.message); return; }
     setBookingData(data);
     setBookingModal(true);
   };
 
-  const renderLead = ({ item }: { item: Lead }) => (
-    <View style={s.card}>
-      <View style={s.cardTop}>
-        <View style={s.avatar}>
-          <Text style={s.avatarText}>{item.name[0]?.toUpperCase() ?? '?'}</Text>
-        </View>
-        <View style={s.cardInfo}>
-          <Text style={s.leadName}>{item.name}</Text>
-          <View style={s.row}><Ionicons name="call" size={13} color="#10b981" /><Text style={s.contactText}>{item.contact_no}</Text></View>
-          <View style={s.statusBadge}>
-            <Text style={[s.statusText, { color: STATUS_COLORS[item.status] || '#10b981' }]}>{item.status.toUpperCase()}</Text>
+  const handleGenerateBill = async (id: string) => {
+    try {
+      setGeneratingBill(true);
+      await generatePaymentBill(id);
+    } catch (e: any) {
+      Alert.alert('Error', 'Failed to generate bill: ' + e.message);
+    } finally {
+      setGeneratingBill(false);
+    }
+  };
+
+  const shareItineraryWithGuest = async (lead: Lead, booking: any) => {
+    const itin = itineraries.find(i => i.id === (booking.itinerary_id || lead.itinerary_id));
+    const isBali = lead.destination?.toLowerCase().includes('bali');
+    
+    // Get inclusions/exclusions for the selected option
+    const opt = lead.itinerary_option;
+    const pricing = (itin && opt && itin.pricing_data?.[opt]) ? (itin.pricing_data[opt] as any) : null;
+    const inclusions = pricing?.inclusions || [];
+    const exclusions = pricing?.exclusions || [];
+    
+    const sep = "━━━━━━━━━━━━━━━━━━";
+    
+    let message = `*CONFIRMED TRIP MANIFEST – V2.1*\n\n`;
+    message += `\uD83C\uDF34 *NOMADLLER PVT LTD – ${(lead.destination || 'TRIP').toUpperCase()}* \uD83C\uDDEE\uD83C\uDDE9\n\n`;
+    const optionLabel = lead.itinerary_option ? (OPTION_META[lead.itinerary_option]?.label ?? lead.itinerary_option) : null;
+    message += `\u2728 *${itin?.title || 'Professional Travel Itinerary'} ${optionLabel ? `WITH ${optionLabel.toUpperCase()}` : ''}*\n\n`;
+    
+    message += `\uD83D\uDCB0 *PACKAGE COST:*\n`;
+    if (booking.total_amount_usd) {
+      const advanceUSD = booking.advance_paid_usd || (booking.advance_paid ? booking.advance_paid / 95 : 0);
+      const dueUSD = booking.due_amount_usd || (booking.total_amount_usd - advanceUSD);
+      
+      message += `• USD ${booking.total_amount_usd.toLocaleString()} per person\n`;
+      message += `• Advance Paid: USD ${advanceUSD.toLocaleString()}\n`;
+      message += `• Balance Due: USD ${dueUSD.toLocaleString()}\n\n`;
+    } else {
+      message += `• USD — (Please confirm with travel agent)\n\n`;
+    }
+    
+    message += `\uD83D\uDC65 *Pax:* ${booking.guest_pax || lead.pax_count || '2'} Adults\n`;
+    message += `\uD83D\uDCC5 *Travel Dates:* ${booking.travel_start_date || 'As per availability'} to ${booking.travel_end_date || ''}\n\n`;
+
+    message += `${sep}\n\n`;
+    message += `\uD83D\uDCCD *ROUTE*\n${lead.destination || 'Scenic Tour'}\n\n`;
+    message += `${sep}\n\n`;
+
+    if (itin?.description) {
+      const days = itin.description.split('\n\n');
+      days.forEach(day => {
+        if (day.trim()) {
+          message += `${day.trim()}\n\n`;
+          message += `${sep}\n\n`;
+        }
+      });
+    }
+
+    // ── Sections ───────────────────────────────────────────
+    if (inclusions.length > 0) {
+      message += `\`INCLUSIONS:\`\n`;
+      inclusions.forEach((item: string) => { message += `• ${item}\n`; });
+      message += `\n${sep}\n\n`;
+    }
+    
+    if (exclusions.length > 0) {
+      message += `\`EXCLUSIONS:\`\n`;
+      exclusions.forEach((item: string) => { message += `• ${item}\n`; });
+      message += `\n${sep}\n\n`;
+    }
+
+    const allNotes = [];
+    if (itin?.important_notes) allNotes.push(itin.important_notes);
+    // Bali link always included for confirmed Bali trips
+    if (isBali) {
+      allNotes.push("Mandatory Electronic Customs Declaration (Arrival Card) required within 72h of arrival: https://allindonesia.imigrasi.go.id/arrival-card-submission/personal-information");
+    }
+
+    if (allNotes.length > 0) {
+      message += `\`\uD83D\uDCCC IMPORTANT NOTES:\`\n`;
+      allNotes.forEach(note => { message += `• ${note}\n`; });
+      message += `\n${sep}\n\n`;
+    }
+    
+    message += `*NOMADLLER PVT LTD*\n\u2728 *Explore the Unexplored*`;
+
+    const cleanPhone = lead.contact_no.replace(/[^0-9]/g, '');
+    const encoded = encodeURIComponent(message);
+    const waUrl = `https://wa.me/${cleanPhone}?text=${encoded}`;
+    
+    Linking.openURL(waUrl).catch(() => {
+      Alert.alert('Error', 'Could not open WhatsApp.');
+    });
+  };
+
+  // ── Standard lead card — horizontal info bar + action row ─────────────────
+  const renderLead = ({ item, index }: { item: Lead; index: number }) => {
+    const statusColor = STATUS_COLORS[item.status] || C.primary;
+    const statusBg    = STATUS_BG[item.status]    || C.primaryLight;
+
+    return (
+      <View style={s.card}>
+        {/* Top row: number badge + name + status */}
+        <View style={s.cardHead}>
+          <View style={[s.numBadge, { backgroundColor: statusBg }]}>
+            <Text style={[s.numBadgeText, { color: statusColor }]}>
+              {String(index + 1).padStart(2, '0')}
+            </Text>
+          </View>
+          <View style={s.headInfo}>
+            <Text style={s.leadName} numberOfLines={1}>{item.name}</Text>
+            {item.destination ? (
+              <View style={s.row}>
+                <Ionicons name="location-outline" size={11} color={C.textMuted} />
+                <Text style={s.subText}>{item.destination}</Text>
+              </View>
+            ) : null}
+          </View>
+          <View style={[s.statusPill, { backgroundColor: statusBg }]}>
+            <Text style={[s.statusText, { color: statusColor }]}>{item.status}</Text>
           </View>
         </View>
-        <View style={[s.statusDot, { backgroundColor: STATUS_COLORS[item.status] ?? '#6366f1' }]} />
+
+        {/* Contact bar */}
+        <View style={s.contactBar}>
+          <Ionicons name="call-outline" size={13} color={C.green} />
+          <Text style={s.contactNum}>{item.contact_no}</Text>
+        </View>
+
+        {/* Action row — pill buttons */}
+        <View style={s.actionRow}>
+          <TouchableOpacity style={[s.pill, { backgroundColor: C.blue }]} onPress={() => handleCall(item)}>
+            <Ionicons name="call" size={13} color="#fff" />
+            <Text style={s.pillTxt}>Call</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[s.pill, { backgroundColor: C.green }]} onPress={() => handleWhatsApp(item)}>
+            <Ionicons name="logo-whatsapp" size={13} color="#141414" />
+            <Text style={[s.pillTxt, { color: '#141414' }]}>WhatsApp</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[s.pill, { backgroundColor: C.surface2, borderWidth: 1, borderColor: C.border }]}
+            onPress={() => { setActiveLead(item); setProfileModal(true); }}
+          >
+            <Ionicons name="create-outline" size={13} color={C.textSecond} />
+            <Text style={[s.pillTxt, { color: C.textSecond }]}>Edit</Text>
+          </TouchableOpacity>
+        </View>
       </View>
-      <View style={s.actionRow}>
-        <TouchableOpacity style={[s.actionBtn, s.callBtn]} onPress={() => handleCall(item)}>
-          <Ionicons name="call" size={16} color="#fff" /><Text style={s.actionBtnText}>Call</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[s.actionBtn, s.whatsappBtn]} onPress={() => handleWhatsApp(item)}>
-          <Ionicons name="logo-whatsapp" size={16} color="#fff" /><Text style={s.actionBtnText}>WhatsApp</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[s.actionBtn, s.editBtn]} onPress={() => { setActiveLead(item); setProfileModal(true); }}>
-          <Ionicons name="pencil-outline" size={16} color="#fff" /><Text style={s.actionBtnText}>Edit</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+    );
+  };
 
   const getOpsProgress = (leadId: string) => {
     const b = allBookings[leadId];
-    if (!b || !b.checklist) return 0;
-    const opsSteps = ['passport', 'pan', 'flights', 'itinerary', 'inc_exc', 'hotels', 'important_info', 'payment', 'pdf'];
-    const done = opsSteps.filter(key => !!b.checklist?.[key]).length;
-    return Math.round((done / opsSteps.length) * 100);
+    if (!b?.checklist) return 0;
+    const keys = ['passport','pan','flights','itinerary','inc_exc','hotels','important_info','payment','pdf'];
+    return Math.round((keys.filter(k => !!b.checklist[k]).length / keys.length) * 100);
   };
 
+  // ── Booking card — progress bar + detail button ───────────────────────────
   const renderBookingLead = ({ item }: { item: Lead }) => {
-    const progress = getOpsProgress(item.id);
-    const hasBooking = !!allBookings[item.id];
+    const progress    = getOpsProgress(item.id);
+    const isAllocated = item.status === 'Allocated';
+    const accent      = isAllocated ? C.purple : C.green;
+    const accentBg    = isAllocated ? C.purpleLight : C.greenLight;
+    const hasBooking  = !!allBookings[item.id];
 
     return (
-      <View style={[s.card, { borderLeftWidth: 4, borderLeftColor: item.status === 'Allocated' ? '#8b5cf6' : '#10b981' }]}>
-        <View style={s.cardTop}>
-          <View style={[s.avatar, { backgroundColor: item.status === 'Allocated' ? '#8b5cf622' : '#10b98122' }]}>
-            <Text style={[s.avatarText, { color: item.status === 'Allocated' ? '#8b5cf6' : '#10b981' }]}>{item.name[0]?.toUpperCase() ?? '?'}</Text>
+      <View style={[s.card, { borderLeftWidth: 3, borderLeftColor: accent }]}>
+        <View style={s.cardHead}>
+          <View style={[s.numBadge, { backgroundColor: accentBg }]}>
+            <Text style={[s.numBadgeText, { color: accent }]}>{item.name[0]?.toUpperCase()}</Text>
           </View>
-          <View style={s.cardInfo}>
-            <Text style={s.leadName}>{item.name}</Text>
-            <View style={s.row}><Ionicons name="map" size={13} color="#64748b" /><Text style={s.meta}>{item.destination}</Text></View>
-            <View style={[s.statusBadge, { backgroundColor: item.status === 'Allocated' ? '#8b5cf615' : '#10b98115' }]}>
-              <Text style={[s.statusText, { color: item.status === 'Allocated' ? '#8b5cf6' : '#10b981' }]}>
-                {item.status === 'Allocated' ? 'ALLOCATED' : 'CONFIRMED'}
-              </Text>
+          <View style={s.headInfo}>
+            <Text style={s.leadName} numberOfLines={1}>{item.name}</Text>
+            <View style={s.row}>
+              <Ionicons name="map-outline" size={11} color={C.textMuted} />
+              <Text style={s.subText}>{item.destination}</Text>
             </View>
           </View>
-          <TouchableOpacity style={s.viewDetailsBtn} onPress={() => openBookingDetails(item)}>
-            <Text style={s.viewDetailsBtnText}>Details</Text>
-            <Ionicons name="chevron-forward" size={14} color="#818cf8" />
-          </TouchableOpacity>
+          <View style={s.bookingActions}>
+            <TouchableOpacity
+              style={[s.detailBtn, { borderColor: accent + '50' }]}
+              onPress={() => openBookingDetails(item)}
+            >
+              <Text style={[s.detailBtnTxt, { color: accent }]}>Details</Text>
+              <Ionicons name="chevron-forward" size={11} color={accent} />
+            </TouchableOpacity>
+
+            {hasBooking && (
+              <TouchableOpacity
+                style={[s.billBtn, { backgroundColor: '#25D36620' }]}
+                onPress={() => shareItineraryWithGuest(item, allBookings[item.id])}
+              >
+                <Ionicons name="logo-whatsapp" size={15} color="#25D366" />
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={[s.billBtn, generatingBill && { opacity: 0.5 }]}
+              onPress={() => handleGenerateBill(item.id)}
+              disabled={generatingBill}
+            >
+              {generatingBill
+                ? <ActivityIndicator size="small" color={C.green} />
+                : <Ionicons name="receipt-outline" size={15} color={C.green} />
+              }
+            </TouchableOpacity>
+          </View>
         </View>
-        
-        {/* Operations Progress Bar */}
+
         {hasBooking && (
-          <View style={{ marginTop: 12 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-              <Text style={{ color: '#64748b', fontSize: 10, fontWeight: '800' }}>OPERATIONS PROGRESS</Text>
-              <Text style={{ color: '#10b981', fontSize: 10, fontWeight: '800' }}>{progress}%</Text>
+          <View style={s.progressBlock}>
+            <View style={s.progressHeader}>
+              <Text style={s.progressLabel}>OPS PROGRESS</Text>
+              <Text style={[s.progressPct, { color: accent }]}>{progress}%</Text>
             </View>
-            <View style={{ height: 4, backgroundColor: '#1e293b', borderRadius: 2, overflow: 'hidden' }}>
-              <View style={{ height: '100%', backgroundColor: '#10b981', width: `${progress}%` }} />
+            <View style={s.progressTrack}>
+              <View style={[s.progressFill, { width: `${progress}%`, backgroundColor: accent }]} />
             </View>
           </View>
         )}
 
-        {/* Itinerary Modified Alert */}
         {item.ops_itinerary_edited && (
-          <View style={{ marginTop: 10, backgroundColor: '#ef444415', padding: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: '#ef444433' }}>
-            <Ionicons name="warning" size={16} color="#ef4444" />
-            <Text style={{ color: '#ef4444', fontSize: 12, fontWeight: '700' }}>Itinerary modified by Operations!</Text>
+          <View style={s.warningBar}>
+            <Ionicons name="warning-outline" size={13} color={C.amber} />
+            <Text style={s.warningTxt}>Itinerary modified by Operations</Text>
           </View>
         )}
       </View>
     );
   };
 
-  return (
-    <View style={s.container}>
-      <View style={s.header}>
-        <Text style={s.headerTitle}>{title}</Text>
-        <Ionicons name="notifications-outline" size={24} color="#94a3b8" />
+  // ── Screen header bar (since headerShown=false) ────────────────────────────
+  const ListHeader = () => (
+    <View style={s.screenHeader}>
+      <Text style={s.screenTitle}>{title}</Text>
+      <View style={s.screenMeta}>
+        <Text style={s.screenCount}>{leads.length}</Text>
+        <Text style={s.screenCountLabel}>leads</Text>
       </View>
+    </View>
+  );
 
-      {loading ? <ActivityIndicator color="#10b981" style={{ marginTop: 40 }} /> : (
+  return (
+    <View style={s.root}>
+      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+
+      {loading ? (
+        <View style={s.loadingWrap}>
+          <ActivityIndicator color={C.primary} size="large" />
+        </View>
+      ) : (
         <FlatList
           data={leads}
           keyExtractor={i => i.id}
           renderItem={(tabType === 'confirmed' || tabType === 'allocated') ? renderBookingLead : renderLead}
+          ListHeaderComponent={<ListHeader />}
           contentContainerStyle={s.list}
           ListEmptyComponent={
             <View style={s.emptyWrap}>
-              <View style={s.emptyGlow}><Ionicons name="layers-outline" size={48} color="#10b981" /></View>
-              <Text style={s.emptyText}>No leads found in this category.</Text>
+              <View style={s.emptyCircle}>
+                <Ionicons name="layers-outline" size={42} color={C.primary} />
+              </View>
+              <Text style={s.emptyNum}>0</Text>
+              <Text style={s.emptyTitle}>No leads yet</Text>
+              <Text style={s.emptyHint}>Add your first lead using the + button</Text>
             </View>
           }
         />
       )}
 
       {showAdd && (
-        <TouchableOpacity style={s.fab} onPress={() => setAddModal(true)}>
-          <Ionicons name="add" size={32} color="#fff" />
+        <TouchableOpacity style={s.fab} onPress={() => setAddModal(true)} activeOpacity={0.85}>
+          <Ionicons name="add" size={30} color="#141414" />
         </TouchableOpacity>
       )}
 
       <AddLeadModal visible={addModal} onClose={() => setAddModal(false)} onSuccess={refresh} styles={s} />
       <EditProfileModal visible={profileModal} onClose={() => setProfileModal(false)} lead={activeLead} destinations={destinations} itineraries={itineraries} onSuccess={refresh} styles={s} />
-      <BookingDetailModal visible={bookingModal} onClose={() => setBookingModal(false)} lead={activeLead} bookingData={bookingData} itineraries={itineraries} onSuccess={refresh} styles={s} />
+      <BookingDetailModal visible={bookingModal} onClose={() => setBookingModal(false)} lead={activeLead} bookingData={bookingData} itineraries={itineraries} destinations={destinations} onSuccess={refresh} styles={s} />
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#070a13' },
-  header: { padding: 20, paddingTop: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  headerTitle: { color: '#f8fafc', fontSize: 24, fontWeight: '900', letterSpacing: -0.5 },
-  list: { paddingHorizontal: 16, paddingBottom: 120, gap: 16 },
-  card: { backgroundColor: '#0f172a', borderRadius: 20, padding: 18, borderWidth: 1, borderColor: '#1e293b', gap: 14 },
-  cardTop: { flexDirection: 'row', gap: 14, alignItems: 'center' },
-  avatar: { width: 48, height: 48, borderRadius: 16, backgroundColor: '#1e293b', justifyContent: 'center', alignItems: 'center' },
-  avatarText: { color: '#f8fafc', fontSize: 20, fontWeight: '800' },
-  cardInfo: { flex: 1, gap: 4 },
-  leadName: { color: '#f8fafc', fontSize: 17, fontWeight: '800' },
-  statusBadge: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: '#1e293b', marginTop: 4 },
-  statusText: { fontSize: 10, fontWeight: '800', letterSpacing: 1 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  contactText: { color: '#10b981', fontSize: 13, fontWeight: '700' },
-  meta: { color: '#64748b', fontSize: 13, fontWeight: '500' },
-  statusDot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: '#070a13' },
-  actionRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 14 },
-  callBtn: { backgroundColor: '#2563eb' },
-  whatsappBtn: { backgroundColor: '#22c55e' },
-  editBtn: { backgroundColor: '#334155' },
-  actionBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
-  viewDetailsBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#6366f115', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: '#6366f133' },
-  viewDetailsBtnText: { color: '#818cf8', fontSize: 13, fontWeight: '800' },
-  emptyWrap: { alignItems: 'center', marginTop: 80, gap: 20 },
-  emptyGlow: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#10b98111', justifyContent: 'center', alignItems: 'center' },
-  emptyText: { color: '#475569', fontSize: 15, fontWeight: '600', textAlign: 'center', maxWidth: 220 },
-  fab: { position: 'absolute', bottom: 30, right: 24, width: 64, height: 64, borderRadius: 20, backgroundColor: '#10b981', justifyContent: 'center', alignItems: 'center', elevation: 10 },
-  overlay: { flex: 1, backgroundColor: '#00000088', justifyContent: 'flex-end' },
-  pickerSheet: { backgroundColor: '#1e293b', padding: 20, paddingBottom: 40 },
-  modal: { flex: 1, backgroundColor: '#070a13' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 24, borderBottomWidth: 1, borderBottomColor: '#0f172a' },
-  modalTitle: { color: '#f8fafc', fontSize: 24, fontWeight: '900' },
-  formContent: { padding: 20, gap: 18, paddingBottom: 60 },
-  fieldGroup: { gap: 8 },
-  fieldLabel: { color: '#94a3b8', fontSize: 13, fontWeight: '700', textTransform: 'uppercase' },
-  input: { backgroundColor: '#0f172a', color: '#f8fafc', borderRadius: 14, padding: 16, fontSize: 15, borderWidth: 1, borderColor: '#1e293b' },
-  bookSection: { gap: 16 },
-  bookHeader: { alignItems: 'center', gap: 4, marginBottom: 8 },
-  bookBadge: { backgroundColor: '#6366f122', color: '#6366f1', fontSize: 10, fontWeight: '800', letterSpacing: 1, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
-  bookMainTitle: { color: '#f8fafc', fontSize: 22, fontWeight: '800', textAlign: 'center' },
-  bookSubTitle: { color: '#64748b', fontSize: 14, textAlign: 'center' },
-  bookCard: { backgroundColor: '#0f172a', borderRadius: 20, padding: 20, gap: 16, borderWidth: 1, borderColor: '#1e293b' },
-  bookGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
-  bookGridItem: { flex: 1, minWidth: '40%' },
-  bookGridLabel: { color: '#64748b', fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
-  bookGridValue: { color: '#f8fafc', fontSize: 16, fontWeight: '800' },
-  bookRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#1e293b' },
-  bookLabel: { color: '#94a3b8', fontSize: 14, fontWeight: '600' },
-  bookValue: { color: '#f8fafc', fontSize: 14, fontWeight: '700', textAlign: 'right', flex: 1 },
-  saveBtn: { backgroundColor: '#10b981', borderRadius: 16, paddingVertical: 18, alignItems: 'center', marginTop: 10, flexDirection: 'row', justifyContent: 'center' },
-  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '900', textTransform: 'uppercase' },
-  dateBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#0f172a', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#1e293b' },
-  dateBtnText: { color: '#475569', fontSize: 15 },
-  chipRow: { flexDirection: 'row', gap: 8 },
-  chip: { borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155' },
-  chipActive: { backgroundColor: '#10b981', borderColor: '#10b981' },
-  chipText: { color: '#94a3b8', fontSize: 13, fontWeight: '600' },
-  chipTextActive: { color: '#fff' },
-  pickerTitle: { color: '#94a3b8', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', marginBottom: 8 },
-  pickerItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 13, paddingHorizontal: 10, borderRadius: 10 },
-  pickerItemText: { flex: 1, color: '#cbd5e1', fontSize: 15 },
+  root:        { flex: 1, backgroundColor: C.bg },
+  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  list:        { padding: S.lg, paddingBottom: 120, gap: S.sm },
+
+  // Screen header (replaces expo nav header)
+  screenHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end',
+    paddingBottom: S.lg,
+  },
+  screenTitle:      { color: C.textPrimary, fontSize: 28, fontWeight: '900', letterSpacing: -0.8 },
+  screenMeta:       { flexDirection: 'row', alignItems: 'baseline', gap: 4, marginBottom: 3 },
+  screenCount:      { color: C.primary, fontSize: 22, fontWeight: '900' },
+  screenCountLabel: { color: C.textMuted, fontSize: 12, fontWeight: '600' },
+
+  // Lead card
+  card: {
+    backgroundColor: C.surface,
+    borderRadius: R.xl, padding: S.lg, gap: S.md,
+    borderWidth: 1, borderColor: C.border,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, shadowRadius: 10, elevation: 5,
+  },
+  cardHead: { flexDirection: 'row', gap: S.md, alignItems: 'center' },
+
+  // Numbered badge (like reference "09", "06" priority numbers)
+  numBadge: {
+    width: 46, height: 46, borderRadius: 14,
+    justifyContent: 'center', alignItems: 'center',
+    flexShrink: 0,
+  },
+  numBadgeText: { fontSize: 16, fontWeight: '900', letterSpacing: -0.5 },
+
+  headInfo:  { flex: 1, gap: 3 },
+  leadName:  { color: C.textPrimary, fontSize: 16, fontWeight: '800' },
+  row:       { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  subText:   { color: C.textMuted, fontSize: 11 },
+
+  statusPill: {
+    paddingHorizontal: 10, paddingVertical: 4,
+    borderRadius: R.full, alignSelf: 'flex-start',
+  },
+  statusText: { fontSize: 11, fontWeight: '800' },
+
+  // Contact bar
+  contactBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: C.surface2, borderRadius: R.sm,
+    paddingHorizontal: S.md, paddingVertical: 8,
+  },
+  contactNum: { color: C.green, fontSize: 13, fontWeight: '700', flex: 1 },
+
+  // Pill action buttons
+  actionRow: { flexDirection: 'row', gap: S.xs },
+  pill: {
+    flex: 1, flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'center', gap: 5,
+    paddingVertical: 10, borderRadius: R.full,
+  },
+  pillTxt: { color: '#fff', fontSize: 12, fontWeight: '800' },
+
+  // Booking card extras
+  bookingActions: { flexDirection: 'row', gap: S.xs, alignItems: 'center' },
+  detailBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    paddingHorizontal: 10, paddingVertical: 6,
+    borderRadius: R.sm, borderWidth: 1,
+    backgroundColor: C.surface2,
+  },
+  detailBtnTxt: { fontSize: 12, fontWeight: '800' },
+  billBtn: {
+    width: 32, height: 32, borderRadius: R.sm,
+    backgroundColor: C.greenLight,
+    justifyContent: 'center', alignItems: 'center',
+  },
+
+  // Progress bar
+  progressBlock:  { gap: 6 },
+  progressHeader: { flexDirection: 'row', justifyContent: 'space-between' },
+  progressLabel:  { color: C.textMuted, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  progressPct:    { fontSize: 10, fontWeight: '800' },
+  progressTrack:  { height: 5, backgroundColor: C.border, borderRadius: 3, overflow: 'hidden' },
+  progressFill:   { height: '100%', borderRadius: 3 },
+
+  warningBar: {
+    flexDirection: 'row', alignItems: 'center', gap: S.xs,
+    backgroundColor: C.amberLight, padding: S.sm, borderRadius: R.xs,
+  },
+  warningTxt: { color: C.amber, fontSize: 11, fontWeight: '700', flex: 1 },
+
+  // Empty state
+  emptyWrap:  { alignItems: 'center', marginTop: 60, gap: S.md },
+  emptyCircle: {
+    width: 100, height: 100, borderRadius: 50,
+    backgroundColor: C.primaryLight,
+    justifyContent: 'center', alignItems: 'center',
+    marginBottom: 4,
+  },
+  emptyNum:   { color: C.primary, fontSize: 48, fontWeight: '900', letterSpacing: -2 },
+  emptyTitle: { color: C.textPrimary, fontSize: 20, fontWeight: '800' },
+  emptyHint:  { color: C.textMuted, fontSize: 13, textAlign: 'center', maxWidth: 200 },
+
+  // FAB — coral with dark icon
+  fab: {
+    position: 'absolute', bottom: 30, right: 24,
+    width: 64, height: 64, borderRadius: 32,
+    backgroundColor: C.primary,
+    justifyContent: 'center', alignItems: 'center',
+    shadowColor: C.primary, shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.55, shadowRadius: 20, elevation: 14,
+  },
+
+  // ── Shared modal styles passed as prop ─────────────────────────────────────
+  overlay:     { flex: 1, backgroundColor: '#00000085', justifyContent: 'flex-end' },
+  pickerSheet: {
+    backgroundColor: C.surface, padding: S.xl, paddingBottom: 40,
+    borderTopLeftRadius: R.xxxl, borderTopRightRadius: R.xxxl,
+  },
+  modal:       { flex: 1, backgroundColor: C.bg },
+  modalHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    padding: S.xl, borderBottomWidth: 1, borderBottomColor: C.border, backgroundColor: C.surface,
+  },
+  modalTitle:  { color: C.textPrimary, fontSize: 22, fontWeight: '900' },
+  formContent: { padding: S.xl, gap: S.lg, paddingBottom: 60 },
+  fieldGroup:  { gap: S.xs },
+  fieldLabel:  { color: C.textMuted, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 },
+
+  input: {
+    backgroundColor: C.surface2, color: C.textPrimary,
+    borderRadius: R.sm, padding: S.md, fontSize: 15,
+    borderWidth: 1.5, borderColor: C.border,
+  },
+
+  // Booking modal shared styles
+  bookSection:   { gap: S.lg },
+  bookHeader:    { alignItems: 'center', gap: 4, marginBottom: S.xs },
+  bookBadge:     { backgroundColor: C.primaryLight, color: C.primary, fontSize: 10, fontWeight: '800', paddingHorizontal: S.xs, paddingVertical: 2, borderRadius: 4 },
+  bookMainTitle: { color: C.textPrimary, fontSize: 22, fontWeight: '800', textAlign: 'center' },
+  bookSubTitle:  { color: C.textMuted, fontSize: 14, textAlign: 'center' },
+  bookCard:      { backgroundColor: C.surface2, borderRadius: R.xl, padding: S.lg, gap: S.lg, borderWidth: 1, borderColor: C.border },
+  bookGrid:      { flexDirection: 'row', flexWrap: 'wrap', gap: S.lg },
+  bookGridItem:  { flex: 1, minWidth: '40%' },
+  bookGridLabel: { color: C.textMuted, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
+  bookGridValue: { color: C.textPrimary, fontSize: 16, fontWeight: '800' },
+  bookRow:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
+  bookLabel:     { color: C.textSecond, fontSize: 14, fontWeight: '600' },
+  bookValue:     { color: C.textPrimary, fontSize: 14, fontWeight: '700', textAlign: 'right', flex: 1 },
+
+  saveBtn: {
+    backgroundColor: C.primary, borderRadius: R.full, paddingVertical: 18,
+    alignItems: 'center', marginTop: S.xs,
+    flexDirection: 'row', justifyContent: 'center',
+    shadowColor: C.primary, shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5, shadowRadius: 18, elevation: 10,
+  },
+  saveBtnText: { color: '#141414', fontSize: 16, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1 },
+
+  dateBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: S.sm,
+    backgroundColor: C.surface2, borderRadius: R.sm, padding: S.md,
+    borderWidth: 1.5, borderColor: C.border,
+  },
+  dateBtnText: { color: C.textSecond, fontSize: 15 },
+
+  chipRow:       { flexDirection: 'row', gap: S.xs, flexWrap: 'wrap' },
+  chip:          { borderRadius: R.full, paddingHorizontal: S.md, paddingVertical: S.sm, backgroundColor: C.surface2, borderWidth: 1, borderColor: C.border },
+  chipActive:    { backgroundColor: C.primaryLight, borderColor: C.primary },
+  chipText:      { color: C.textMuted, fontSize: 13, fontWeight: '600' },
+  chipTextActive: { color: C.primary, fontWeight: '800' },
+
+  pickerTitle:    { color: C.textMuted, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1, marginBottom: S.sm },
+  pickerItem:     { flexDirection: 'row', alignItems: 'center', gap: S.sm, paddingVertical: 13, paddingHorizontal: S.sm, borderRadius: R.sm },
+  pickerItemText: { flex: 1, color: C.textSecond, fontSize: 15 },
 });

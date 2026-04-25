@@ -39,3 +39,11 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Custom ignores
+.env
+*.log
+npm_debug.txt
+npm_output.txt
+bundle_output.json
+scratch/

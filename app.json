@@ -32,7 +32,16 @@
     },
     "plugins": [
       "expo-router",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#4C6EF5",
+          "defaultChannel": "followup-reminders",
+          "sounds": []
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
@@ -40,8 +49,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "f720f5d8-9e4b-445c-b7f3-4c0856ac98fe"
+        "projectId": "afac1d4f-227c-4c58-9e04-9fb34802c1ed"
       }
-    }
+    },
+    "owner": "nomadller-new"
   }
 }

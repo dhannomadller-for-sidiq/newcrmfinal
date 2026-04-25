@@ -4,13 +4,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/utils/supabase';
 import { Lead, Destination, Itinerary, OPTION_META, FOLLOWUP_STATUSES } from '@/lib/salesConstants';
 import { DateField } from './DateField';
+import { C } from '@/lib/theme';
+import { scheduleFollowupReminder, scheduleEarlyReminder, cancelLeadNotification } from '@/utils/notifications';
 
 function FF({ label, value, onChange, placeholder, keyboardType = 'default', autoCapitalize = 'sentences', styles }: any) {
   return (
     <View style={styles.fieldGroup}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <TextInput style={styles.input} value={value} onChangeText={onChange} placeholder={placeholder}
-        placeholderTextColor="#475569" keyboardType={keyboardType as any} autoCapitalize={autoCapitalize} />
+        placeholderTextColor={C.textMuted} keyboardType={keyboardType as any} autoCapitalize={autoCapitalize} />
     </View>
   );
 }
@@ -21,13 +23,13 @@ function NextFollowup({ date, setDate, showPicker, setShowPicker, time, setTime,
       <Text style={styles.fieldLabel}>📅 Next Follow-up Date</Text>
       <TouchableOpacity style={styles.dateBtn} onPress={() => setShowPicker(true)}>
         <Ionicons name="calendar-outline" size={17} color="#94a3b8" />
-        <Text style={[styles.dateBtnText, date && { color: '#f8fafc' }]}>
+        <Text style={[styles.dateBtnText, date && { color: C.textPrimary }]}>
           {date ? date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Select Date'}
         </Text>
       </TouchableOpacity>
       <DateField value={date} onChange={setDate} showPicker={showPicker} setShowPicker={setShowPicker} styles={styles} />
       <Text style={styles.fieldLabel}>🕐 Follow-up Time (HH:MM)</Text>
-      <TextInput style={styles.input} value={time} onChangeText={setTime} placeholder="10:00" placeholderTextColor="#475569" keyboardType="numbers-and-punctuation" />
+      <TextInput style={styles.input} value={time} onChangeText={setTime} placeholder="10:00" placeholderTextColor={C.textMuted} keyboardType="numbers-and-punctuation" />
     </View>
   );
 }
@@ -237,6 +239,18 @@ export function EditProfileModal({ visible, onClose, lead, destinations, itinera
 
       onSuccess();
       onClose();
+
+      // ── Schedule follow-up notification if a date was set ──────────────
+      const followupTimestamp = getNextFollowupTimestamp();
+      if (followupTimestamp && lead) {
+        const updatedName = fName.trim() || lead.name;
+        await scheduleFollowupReminder({ leadId: lead.id, leadName: updatedName, followupAt: followupTimestamp });
+        await scheduleEarlyReminder({ leadId: lead.id, leadName: updatedName, followupAt: followupTimestamp });
+      } else if (lead && (fFollowupStatus === 'dead' || fFollowupStatus === 'different_location')) {
+        // Cancel any existing reminder if lead is dead or returned
+        await cancelLeadNotification(lead.id);
+      }
+
       const msgs: Record<string, string> = {
         itinerary_sent: 'Itinerary sent! Lead added to Follow-ups.',
         itinerary_updated: 'Itinerary updated! Lead added to Follow-ups.',
@@ -257,28 +271,71 @@ export function EditProfileModal({ visible, onClose, lead, destinations, itinera
     const itin = itineraries.find(i => i.id === fItinId);
     if (!itin) { Alert.alert('Select an itinerary first'); return; }
     
-    let text = `🌍 *${itin.title.toUpperCase()}*`;
-    if (itin.description) text += `\n\n${itin.description}`;
-
+    const isBali = (itin.title + (itin.description || '')).toLowerCase().includes('bali');
+    const sep = "━━━━━━━━━━━━━━━━━━";
+    
+    let text = `🌴 *NOMADLLER PVT LTD – ${(destinations.find(d => d.id === fDestId)?.name || 'TRIP').toUpperCase()}* 🇮🇩\n\n`;
+    const optionLabel = fItinOption ? (OPTION_META[fItinOption]?.label ?? fItinOption) : null;
+    text += `✨ *${itin.title} ${optionLabel ? `WITH ${optionLabel.toUpperCase()}` : ''}*\n\n`;
+    
     if (fItinOption && itin.pricing_data[fItinOption]) {
       const data: any = itin.pricing_data[fItinOption];
-      const meta = OPTION_META[fItinOption];
-      text += `\n\n*💰 PRICING (${(meta?.label ?? fItinOption).toUpperCase()}):* ₹${(data?.price ?? data)?.toLocaleString?.() ?? data}`;
+      const priceUSD = data?.price_usd;
+      const priceINR = data?.price ?? data;
       
-      if (data.inclusions && data.inclusions.length > 0) {
-        text += `\n\n*✅ Inclusions:*\n` + data.inclusions.map((i: string) => `- ${i}`).join('\n');
+      text += `💰 *PACKAGE COST:*\n`;
+      if (priceUSD) {
+        text += `• USD ${priceUSD.toLocaleString()} per person\n\n`;
+      } else {
+        text += `• ₹${(priceINR || 0).toLocaleString()}\n\n`;
       }
+      
+      text += `👥 *Pax:* 2 Adults (Standard)\n`;
+      text += `📅 *Travel Dates:* As per availability\n\n`;
+      text += `${sep}\n\n`;
+      text += `📍 *ROUTE*\n${destinations.find(d => d.id === fDestId)?.name || 'Scenic Tour'}\n\n`;
+      text += `${sep}\n\n`;
+
+      if (itin.description) {
+        const days = itin.description.split('\n\n');
+        days.forEach(day => {
+          if (day.trim()) {
+            text += `${day.trim()}\n\n`;
+            text += `${sep}\n\n`;
+          }
+        });
+      }
+
+      if (data.inclusions && data.inclusions.length > 0) {
+        text += `\`INCLUSIONS:\`\n`;
+        data.inclusions.forEach((item: string) => { text += `• ${item}\n`; });
+        text += `\n${sep}\n\n`;
+      }
+      
       if (data.exclusions && data.exclusions.length > 0) {
-        text += `\n\n*❌ Exclusions:*\n` + data.exclusions.map((e: string) => `- ${e}`).join('\n');
+        text += `\`EXCLUSIONS:\`\n`;
+        data.exclusions.forEach((item: string) => { text += `• ${item}\n`; });
+        text += `\n${sep}\n\n`;
       }
     } else {
-      const pricing = Object.entries(itin.pricing_data as Record<string, any>)
-        .map(([k, v]) => `• ${OPTION_META[k]?.label ?? k}: ₹${(v?.price ?? v)?.toLocaleString?.() ?? v}`)
-        .join('\n');
-      text += `\n\n*💰 Pricing:*\n${pricing}`;
+      text += `💰 *PRICING OPTIONS:*\n`;
+      Object.entries(itin.pricing_data as Record<string, any>).forEach(([k, v]) => {
+        text += `• ${OPTION_META[k]?.label ?? k}: $${v?.price_usd ?? '—'} / ₹${(v?.price ?? v)?.toLocaleString()}\n`;
+      });
+      text += `\n${sep}\n\n`;
     }
 
-    text += `\n\n📞 *Contact us to confirm!*`;
+    const allNotes = [];
+    if (itin.important_notes) allNotes.push(itin.important_notes);
+    // Bali Arrival Card link omitted for the sales profile stage
+
+    if (allNotes.length > 0) {
+      text += `\`📌 IMPORTANT NOTES:\`\n`;
+      allNotes.forEach(note => { text += `• ${note}\n`; });
+      text += `\n${sep}\n\n`;
+    }
+    
+    text += `*NOMADLLER PVT LTD*\n✨ *Explore the Unexplored*`;
 
     const msg = encodeURIComponent(text);
     const n = fContact.replace(/\D/g, '');
@@ -315,7 +372,7 @@ export function EditProfileModal({ visible, onClose, lead, destinations, itinera
           <Text style={styles.fieldLabel}>Travel Date</Text>
           <TouchableOpacity style={styles.dateBtn} onPress={() => setShowDatePicker(true)}>
             <Ionicons name="calendar-outline" size={17} color="#94a3b8" />
-            <Text style={[styles.dateBtnText, fTravelDate && { color: '#f8fafc' }]}>
+            <Text style={[styles.dateBtnText, fTravelDate && { color: C.textPrimary }]}>
               {fTravelDate ? fTravelDate.toLocaleDateString('en-IN') : 'Select Date'}
             </Text>
           </TouchableOpacity>
@@ -339,7 +396,7 @@ export function EditProfileModal({ visible, onClose, lead, destinations, itinera
               <Text style={styles.bookCardTitle}>Select Itinerary</Text>
               <View style={[styles.input, { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12 }]}>
                 <Ionicons name="search-outline" size={15} color="#64748b" />
-                <TextInput style={{ flex: 1, color: '#f8fafc' }} value={itinFilter} onChangeText={setItinFilter} placeholder="Search..." placeholderTextColor="#475569" />
+                <TextInput style={{ flex: 1, color: C.textPrimary, backgroundColor: 'transparent' }} value={itinFilter} onChangeText={setItinFilter} placeholder="Search..." placeholderTextColor={C.textMuted} />
               </View>
               {filteredItins.map(itin => (
                 <TouchableOpacity key={itin.id} style={[styles.card, { padding: 12, borderLeftWidth: 0 }, fItinId === itin.id && { borderColor: '#10b981' }]} onPress={() => { setFItinId(itin.id); setFItinOption(''); }}>
@@ -382,28 +439,28 @@ export function EditProfileModal({ visible, onClose, lead, destinations, itinera
 
           <Text style={[styles.bookCardTitle, { marginTop: 10 }]}>Update Follow-up Status</Text>
           <TouchableOpacity style={[styles.input, { flexDirection: 'row', justifyContent: 'space-between' }, selectedFollowupMeta && { borderColor: selectedFollowupMeta.color }]} onPress={() => setFollowupPickerOpen(true)}>
-            {selectedFollowupMeta ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><Ionicons name={selectedFollowupMeta.icon as any} size={16} color={selectedFollowupMeta.color} /><Text style={{ color: selectedFollowupMeta.color, fontWeight: '700' }}>{selectedFollowupMeta.label}</Text></View> : <Text style={{ color: '#475569' }}>Select status...</Text>}
+            {selectedFollowupMeta ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><Ionicons name={selectedFollowupMeta.icon as any} size={16} color={selectedFollowupMeta.color} /><Text style={{ color: selectedFollowupMeta.color, fontWeight: '700' }}>{selectedFollowupMeta.label}</Text></View> : <Text style={{ color: C.textMuted }}>Select status...</Text>}
             <Ionicons name="chevron-down" size={16} color="#475569" />
           </TouchableOpacity>
 
           {fFollowupStatus === 'itinerary_sent' && (
-            <View style={[styles.bookCard, { borderColor: '#6366f155' }]}>
-              <Text style={{ color: '#6366f1', fontWeight: '800' }}>Confirm Sending</Text>
+            <View style={[styles.bookCard, { borderColor: C.primary + '55' }]}>
+              <Text style={{ color: C.primary, fontWeight: '800' }}>Confirm Sending</Text>
               {fItinId ? <Text style={styles.bookGridValue}>✅ {getItinTitle(fItinId)}</Text> : <Text style={{ color: '#ef4444' }}>⚠️ Select itinerary first</Text>}
               <NextFollowup date={fNextFollowupDate} setDate={setFNextFollowupDate} showPicker={showNextDatePicker} setShowPicker={setShowNextDatePicker} time={fNextFollowupTime} setTime={setFNextFollowupTime} styles={styles} />
             </View>
           )}
 
           {fFollowupStatus === 'followup' && (
-            <View style={[styles.bookCard, { borderColor: '#10b98155' }]}>
+            <View style={[styles.bookCard, { borderColor: C.green + '55' }]}>
               <Text style={styles.fieldLabel}>Call Remarks</Text>
-              <TextInput style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]} value={fRemarks} onChangeText={setFRemarks} placeholder="Notes..." placeholderTextColor="#475569" multiline />
+              <TextInput style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]} value={fRemarks} onChangeText={setFRemarks} placeholder="Notes..." placeholderTextColor={C.textMuted} multiline />
               <NextFollowup date={fNextFollowupDate} setDate={setFNextFollowupDate} showPicker={showNextDatePicker} setShowPicker={setShowNextDatePicker} time={fNextFollowupTime} setTime={setFNextFollowupTime} styles={styles} />
             </View>
           )}
 
           {fFollowupStatus === 'advance_paid' && (
-            <View style={[styles.bookCard, { borderColor: '#10b98155' }]}>
+            <View style={[styles.bookCard, { borderColor: C.green + '55' }]}>
               <Text style={styles.bookCardTitle}>💰 Payment Details</Text>
               <FF label="Total Amount (₹)" value={fTotalAmount} onChange={setFTotalAmount} placeholder="100000" keyboardType="numeric" styles={styles} />
               <FF label="Advance Paid (₹)" value={fAdvancePaid} onChange={setFAdvancePaid} placeholder="50000" keyboardType="numeric" styles={styles} />

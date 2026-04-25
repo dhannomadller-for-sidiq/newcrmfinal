@@ -1,14 +1,20 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator,
-  Linking, Alert, Modal, ScrollView, TextInput, AppState, AppStateStatus, Platform,
+  Linking, Alert, Modal, ScrollView, TextInput, AppState, AppStateStatus, Platform, KeyboardAvoidingView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/utils/supabase';
+import { C, R, S } from '@/lib/theme';
+import { STATUS_COLORS, FOLLOWUP_STATUSES, TRIP_PLACE_SUGGESTIONS, FUP_COLORS, FUP_LABELS, OPTION_META } from '@/lib/salesConstants';
 import { useAuth } from '@/contexts/AuthContext';
 
 const NativeDTP = Platform.OS !== 'web'
   ? require('@react-native-community/datetimepicker').default : null;
+
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
+import { parseTicketFile } from '@/utils/ticketParser';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Lead = {
@@ -16,32 +22,11 @@ type Lead = {
   status: string; followup_status: string | null; next_followup_at: string | null;
   call_remarks: string | null; itinerary_id: string | null; itinerary_option: string | null;
   itinerary_history: Array<{ id: string; title: string; option?: string | null; option_label?: string | null }>;
+  created_at?: string;
 };
-type Itinerary = { id: string; title: string; destination_id: string; pricing_data: Record<string, unknown>; description?: string };
+type Itinerary = { id: string; title: string; destination_id: string; pricing_data: Record<string, unknown>; description?: string; important_notes?: string };
 
-const OPTION_META: Record<string, { label: string; icon: string; color: string }> = {
-  car:  { label: 'Self-Drive Car',  icon: 'car',     color: '#6366f1' },
-  bike: { label: 'Self-Drive Bike', icon: 'bicycle', color: '#f59e0b' },
-  cab:  { label: 'Cab Service',     icon: 'bus',     color: '#10b981' },
-};
 
-const FOLLOWUP_STATUSES = [
-  { key: 'itinerary_sent',     label: '1. Itinerary Sent',           icon: 'send-outline',             color: '#6366f1' },
-  { key: 'itinerary_updated',  label: '2. Itinerary Updated',        icon: 'refresh-outline',          color: '#f59e0b' },
-  { key: 'followup',           label: '3. Follow-up',                icon: 'chatbubble-outline',       color: '#10b981' },
-  { key: 'different_location', label: '4. Different Location',       icon: 'location-outline',         color: '#8b5cf6' },
-  { key: 'advance_paid',       label: '5. Advance Paid & Confirmed', icon: 'checkmark-circle-outline', color: '#10b981' },
-  { key: 'dead',               label: '6. Dead Lead',                icon: 'skull-outline',             color: '#ef4444' },
-];
-const FUP_COLORS: Record<string, string> = {
-  itinerary_sent: '#6366f1', itinerary_updated: '#f59e0b', followup: '#10b981',
-  different_location: '#8b5cf6', advance_paid: '#10b981', dead: '#ef4444',
-};
-const FUP_LABELS: Record<string, string> = {
-  itinerary_sent: 'Itinerary Sent', itinerary_updated: 'Itinerary Updated',
-  followup: 'Follow-up', different_location: 'Diff. Location',
-  advance_paid: 'Advance Paid', dead: 'Dead Lead',
-};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function FollowupsScreen() {
@@ -82,8 +67,10 @@ export default function FollowupsScreen() {
   // ── Advance paid fields ──────────────────────────────────────────────────
   const [fTotal, setFTotal] = useState('');
   const [fAdvance, setFAdvance] = useState('');
+  const [fPax, setFPax] = useState('');
   const [fPassportNo, setFPassportNo] = useState('');
   const [fPassportName, setFPassportName] = useState('');
+  const [fPanNo, setFPanNo] = useState('');
   const [fArrPNR, setFArrPNR] = useState('');
   const [fArrFlight, setFArrFlight] = useState('');
   const [fArrDepPlace, setFArrDepPlace] = useState('Cochin Airport');
@@ -100,6 +87,54 @@ export default function FollowupsScreen() {
   const [fDepArrAirport, setFDepArrAirport] = useState('Cochin Airport');
   const [fDepArrDate, setFDepArrDate] = useState('');
   const [fDepArrTime, setFDepArrTime] = useState('');
+  const [fRegion, setFRegion] = useState('Indian');
+  const [fGuestList, setFGuestList] = useState('');
+
+  // ── Train fields ────────────────────────────────────────────────────────
+  const [fArrTrainPnr, setFArrTrainPnr] = useState('');
+  const [fArrTrainNo, setFArrTrainNo] = useState('');
+  const [fArrTrainName, setFArrTrainName] = useState('');
+  const [fArrTrainDepPlace, setFArrTrainDepPlace] = useState('');
+  const [fArrTrainDepDate, setFArrTrainDepDate] = useState('');
+  const [fArrTrainDepTime, setFArrTrainDepTime] = useState('');
+  const [fArrTrainArrStation, setFArrTrainArrStation] = useState('');
+  const [fArrTrainArrDate, setFArrTrainArrDate] = useState('');
+  const [fArrTrainArrTime, setFArrTrainArrTime] = useState('');
+
+  const [fDepTrainPnr, setFDepTrainPnr] = useState('');
+  const [fDepTrainNo, setFDepTrainNo] = useState('');
+  const [fDepTrainName, setFDepTrainName] = useState('');
+  const [fDepTrainDepPlace, setFDepTrainDepPlace] = useState('');
+  const [fDepTrainDepDate, setFDepTrainDepDate] = useState('');
+  const [fDepTrainDepTime, setFDepTrainDepTime] = useState('');
+  const [fDepTrainArrStation, setFDepTrainArrStation] = useState('');
+  const [fDepTrainArrDate, setFDepTrainArrDate] = useState('');
+  const [fDepTrainArrTime, setFDepTrainArrTime] = useState('');
+
+  // ── Bus fields ────────────────────────────────────────────────────────
+  const [fArrBusName, setFArrBusName] = useState('');
+  const [fArrBusDepStation, setFArrBusDepStation] = useState('');
+  const [fArrBusDepDate, setFArrBusDepDate] = useState('');
+  const [fArrBusDepTime, setFArrBusDepTime] = useState('');
+  const [fArrBusArrStation, setFArrBusArrStation] = useState('');
+  const [fArrBusArrDate, setFArrBusArrDate] = useState('');
+  const [fArrBusArrTime, setFArrBusArrTime] = useState('');
+  const [fArrBusOperatorContact, setFArrBusOperatorContact] = useState('');
+
+  const [fDepBusName, setFDepBusName] = useState('');
+  const [fDepBusDepStation, setFDepBusDepStation] = useState('');
+  const [fDepBusDepDate, setFDepBusDepDate] = useState('');
+  const [fDepBusDepTime, setFDepBusDepTime] = useState('');
+  const [fDepBusArrStation, setFDepBusArrStation] = useState('');
+  const [fDepBusArrDate, setFDepBusArrDate] = useState('');
+  const [fDepBusArrTime, setFDepBusArrTime] = useState('');
+  const [fDepBusOperatorContact, setFDepBusOperatorContact] = useState('');
+
+  const [fTransportMode, setFTransportMode] = useState<'flights' | 'train' | 'bus' | null>(null);
+
+  const [parsing, setParsing] = useState(false);
+  const [destinations, setDestinations] = useState<any[]>([]);
+  const [liveRate, setLiveRate] = useState(95);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   const fetchFollowups = useCallback(async () => {
@@ -111,14 +146,20 @@ export default function FollowupsScreen() {
       .not('next_followup_at', 'is', null)
       .or(`assigned_to.eq.${profile.id},added_by.eq.${profile.id}`)
       .not('status', 'in', '("Lost","Converted")')
-      .order('next_followup_at', { ascending: true });
+      .order('created_at', { ascending: false });
     setLeads(data ?? []);
     setLoading(false);
   }, [profile]);
 
   const fetchItineraries = useCallback(async () => {
-    const { data } = await supabase.from('itineraries').select('id, title, description, destination_id, pricing_data').order('title');
+    const { data } = await supabase.from('itineraries').select('id, title, description, important_notes, destination_id, pricing_data').order('title');
     setItineraries(data ?? []);
+
+    const { data: dests } = await supabase.from('destinations').select('id, name, checklist');
+    setDestinations(dests ?? []);
+
+    const { data: setts } = await supabase.from('settings').select('*').eq('key', 'usd_rate').maybeSingle();
+    if (setts?.value) setLiveRate(parseFloat(setts.value) || 95);
   }, []);
 
   useEffect(() => { fetchFollowups(); fetchItineraries(); }, [fetchFollowups, fetchItineraries]);
@@ -190,14 +231,44 @@ export default function FollowupsScreen() {
     setItinFilter('');
     setFDiffDestination('');
     // reset advance paid
-    setFTotal(''); setFAdvance('');
-    setFPassportNo(''); setFPassportName('');
-    setFPassportNo(''); setFPassportName('');
+    setFTotal(''); setFAdvance(''); setFPax('');
+    setFPassportNo(''); setFPassportName(''); setFPanNo('');
     setFArrPNR(''); setFArrFlight(''); setFArrDepPlace('Cochin Airport'); setFArrDepDate(''); setFArrDepTime('');
     setFArrArrAirport('Denpasar Airport'); setFArrArrDate(''); setFArrArrTime('');
     setFDepPNR(''); setFDepFlight(''); setFDepDepPlace('Denpasar Airport'); setFDepDepDate(''); setFDepDepTime('');
     setFDepArrAirport('Cochin Airport'); setFDepArrDate(''); setFDepArrTime('');
+    setFArrTrainPnr(''); setFArrTrainNo(''); setFArrTrainName(''); setFArrTrainDepPlace(''); setFArrTrainDepDate(''); setFArrTrainDepTime(''); setFArrTrainArrStation(''); setFArrTrainArrDate(''); setFArrTrainArrTime('');
+    setFDepTrainPnr(''); setFDepTrainNo(''); setFDepTrainName(''); setFDepTrainDepPlace(''); setFDepTrainDepDate(''); setFDepTrainDepTime(''); setFDepTrainArrStation(''); setFDepTrainArrDate(''); setFDepTrainArrTime('');
+    setFArrBusName(''); setFArrBusDepStation(''); setFArrBusDepDate(''); setFArrBusDepTime(''); setFArrBusArrStation(''); setFArrBusArrDate(''); setFArrBusArrTime(''); setFArrBusOperatorContact('');
+    setFDepBusName(''); setFDepBusDepStation(''); setFDepBusDepDate(''); setFDepBusDepTime(''); setFDepBusArrStation(''); setFDepBusArrDate(''); setFDepBusArrTime(''); setFDepBusOperatorContact('');
+    setFRegion('Indian'); setFGuestList('');
     setUpdateModal(true);
+  }
+
+  function handleArrDepDateChange(val: string) {
+    const prev = fArrDepDate;
+    setFArrDepDate(val);
+    if (val) {
+      if (!fArrArrDate || fArrArrDate === prev) setFArrArrDate(val);
+      if (!fDepDepDate || fDepDepDate === prev) setFDepDepDate(val);
+      if (!fDepArrDate || fDepArrDate === prev) setFDepArrDate(val);
+    }
+  }
+
+  function handleArrTrainDepDateChange(val: string) {
+    const prev = fArrTrainDepDate;
+    setFArrTrainDepDate(val);
+    if (val) {
+      if (!fDepTrainDepDate || fDepTrainDepDate === prev) setFDepTrainDepDate(val);
+    }
+  }
+
+  function handleArrBusDepDateChange(val: string) {
+    const prev = fArrBusDepDate;
+    setFArrBusDepDate(val);
+    if (val) {
+      if (!fDepBusDepDate || fDepBusDepDate === prev) setFDepBusDepDate(val);
+    }
   }
 
   function getNextFollowupTs(): string | null {
@@ -227,28 +298,74 @@ export default function FollowupsScreen() {
     const itin = itineraries.find(i => i.id === viewItinId);
     if (!itin) return;
 
-    let text = `🌍 *${itin.title.toUpperCase()}*`;
-    if (itin.description) text += `\n\n${itin.description}`;
-
+    const isBali = (viewLead.destination || '').toLowerCase().includes('bali');
+    const sep = "━━━━━━━━━━━━━━━━━━";
+    
+    let text = `\u2728 *PREMIUM TRAVEL ITINERARY* \u2728\n\n`;
+    text += `\uD83C\uDF34 *NOMADLLER PVT LTD – ${(viewLead.destination || 'TRIP').toUpperCase()}* \uD83C\uDDEE\uD83C\uDDE9\n\n`;
+    const optionLabel = viewItinOption ? (OPTION_META[viewItinOption]?.label ?? viewItinOption) : null;
+    text += `\u2728 *${itin.title} ${optionLabel ? `WITH ${optionLabel.toUpperCase()}` : ''}*\n\n`;
+    
+    // Pricing
     if (viewItinOption && itin.pricing_data[viewItinOption]) {
       const data: any = itin.pricing_data[viewItinOption];
-      const meta = OPTION_META[viewItinOption];
-      text += `\n\n*💰 PRICING (${(meta?.label ?? viewItinOption).toUpperCase()}):* ₹${(data?.price ?? data)?.toLocaleString?.() ?? data}`;
+      const priceUSD = data?.price_usd;
+      const priceINR = data?.price ?? data;
       
-      if (data.inclusions && data.inclusions.length > 0) {
-        text += `\n\n*✅ Inclusions:*\n` + data.inclusions.map((i: string) => `- ${i}`).join('\n');
+      text += `\uD83D\uDCB0 *PACKAGE COST:*\n`;
+      if (priceUSD) {
+        text += `• USD ${priceUSD.toLocaleString()} per person\n\n`;
+      } else {
+        text += `• USD — (Please confirm with travel agent)\n\n`;
       }
+      
+      text += `\uD83D\uDC65 *Pax:* 2 Adults (Standard)\n`;
+      text += `\uD83D\uDCC5 *Travel Dates:* As per availability\n\n`;
+      text += `${sep}\n\n`;
+      text += `\uD83D\uDCCD *ROUTE*\n${viewLead.destination || 'Scenic Tour'}\n\n`;
+      text += `${sep}\n\n`;
+
+      if (itin.description) {
+        const days = itin.description.split('\n\n');
+        days.forEach(day => {
+          if (day.trim()) {
+            text += `${day.trim()}\n\n`;
+            text += `${sep}\n\n`;
+          }
+        });
+      }
+
+      if (data.inclusions && data.inclusions.length > 0) {
+        text += `\`INCLUSIONS:\`\n`;
+        data.inclusions.forEach((item: string) => { text += `• ${item}\n`; });
+        text += `\n${sep}\n\n`;
+      }
+      
       if (data.exclusions && data.exclusions.length > 0) {
-        text += `\n\n*❌ Exclusions:*\n` + data.exclusions.map((e: string) => `- ${e}`).join('\n');
+        text += `\`EXCLUSIONS:\`\n`;
+        data.exclusions.forEach((item: string) => { text += `• ${item}\n`; });
+        text += `\n${sep}\n\n`;
       }
     } else {
-      const pricing = Object.entries(itin.pricing_data as Record<string, any>)
-        .map(([k, v]) => `• ${OPTION_META[k]?.label ?? k}: ₹${(v?.price ?? v)?.toLocaleString?.() ?? v}`)
-        .join('\n');
-      text += `\n\n*💰 Pricing:*\n${pricing}`;
+      // General list pricing if no option selected
+      text += `\uD83D\uDCB0 *PRICING OPTIONS:*\n`;
+      Object.entries(itin.pricing_data as Record<string, any>).forEach(([k, v]) => {
+        text += `• ${OPTION_META[k]?.label ?? k}: $${v?.price_usd ?? '—'} / ₹${(v?.price ?? v)?.toLocaleString()}\n`;
+      });
+      text += `\n${sep}\n\n`;
     }
 
-    text += `\n\n📞 *Contact us to confirm!*`;
+    const allNotes = [];
+    if (itin.important_notes) allNotes.push(itin.important_notes);
+    // Link for Bali Arrival Card removed from Sales/Followup stage (pre-confirmation)
+
+    if (allNotes.length > 0) {
+      text += `\`\uD83D\uDCCC IMPORTANT NOTES:\`\n`;
+      allNotes.forEach(note => { text += `• ${note}\n`; });
+      text += `\n${sep}\n\n`;
+    }
+    
+    text += `*NOMADLLER PVT LTD*\n\u2728 *Explore the Unexplored*`;
 
     const msg = encodeURIComponent(text);
     const n = viewLead.contact_no.replace(/\D/g, '');
@@ -257,58 +374,84 @@ export default function FollowupsScreen() {
   }
 
   function handleShareNewItinerary() {
-    if (!updateLead || !fNewItinId) {
-      // If it's sent status, we use existing lead's itin
-      if (fStatus === 'itinerary_sent' && updateLead?.itinerary_id) {
-        const itin = itineraries.find(i => i.id === updateLead.itinerary_id);
-        if (!itin) return;
-        let text = `🌍 *${itin.title.toUpperCase()}*`;
-        if (itin.description) text += `\n\n${itin.description}`;
-        if (updateLead.itinerary_option && itin.pricing_data[updateLead.itinerary_option]) {
-          const data: any = itin.pricing_data[updateLead.itinerary_option];
-          const meta = OPTION_META[updateLead.itinerary_option];
-          text += `\n\n*💰 PRICING (${(meta?.label ?? updateLead.itinerary_option).toUpperCase()}):* ₹${(data?.price ?? data)?.toLocaleString?.() ?? data}`;
-          if (data.inclusions?.length > 0) text += `\n\n*✅ Inclusions:*\n` + data.inclusions.map((i: string) => `- ${i}`).join('\n');
-          if (data.exclusions?.length > 0) text += `\n\n*❌ Exclusions:*\n` + data.exclusions.map((e: string) => `- ${e}`).join('\n');
-        }
-        text += `\n\n📞 *Contact us to confirm!*`;
-        const msg = encodeURIComponent(text);
-        const n = updateLead.contact_no.replace(/\D/g, '');
-        Linking.openURL(`whatsapp://send?phone=${n}&text=${msg}`).catch(() => Alert.alert('WhatsApp not installed'));
-        return;
-      }
+    // Re-use logic for consistency
+    const targetLead = updateLead;
+    const targetItinId = fNewItinId || updateLead?.itinerary_id;
+    const targetOption = fNewItinOption || updateLead?.itinerary_option;
+
+    if (!targetLead || !targetItinId) {
       Alert.alert('Selection Required', 'Please select an itinerary first.');
       return;
     }
 
-    const itin = itineraries.find(i => i.id === fNewItinId);
+    const itin = itineraries.find(i => i.id === targetItinId);
     if (!itin) return;
 
-    let text = `🌍 *${itin.title.toUpperCase()}*`;
-    if (itin.description) text += `\n\n${itin.description}`;
-
-    if (fNewItinOption && itin.pricing_data[fNewItinOption]) {
-      const data: any = itin.pricing_data[fNewItinOption];
-      const meta = OPTION_META[fNewItinOption];
-      text += `\n\n*💰 PRICING (${(meta?.label ?? fNewItinOption).toUpperCase()}):* ₹${(data?.price ?? data)?.toLocaleString?.() ?? data}`;
-      
-      if (data.inclusions && data.inclusions.length > 0) {
-        text += `\n\n*✅ Inclusions:*\n` + data.inclusions.map((i: string) => `- ${i}`).join('\n');
+    const isBali = (targetLead.destination || '').toLowerCase().includes('bali');
+    const sep = "━━━━━━━━━━━━━━━━━━";
+    
+    let text = `🌴 *NOMADLLER PVT LTD – ${(targetLead.destination || 'TRIP').toUpperCase()}* 🇮🇩\n\n`;
+    const optionLabel = targetOption ? (OPTION_META[targetOption]?.label ?? targetOption) : null;
+    text += `✨ *${itin.title} ${optionLabel ? `WITH ${optionLabel.toUpperCase()}` : ''}*\n\n`;
+    
+    if (targetOption && itin.pricing_data[targetOption]) {
+      const data: any = itin.pricing_data[targetOption];
+      text += `💰 *PACKAGE COST:*\n`;
+      if (data?.price_usd) {
+        text += `• USD ${data.price_usd.toLocaleString()} per person\n\n`;
+      } else {
+        text += `• ₹${(data?.price ?? data)?.toLocaleString()}\n\n`;
       }
+      
+      text += `👥 *Pax:* 2 Adults (Standard)\n`;
+      text += `📅 *Travel Dates:* As per availability\n\n`;
+      text += `${sep}\n\n`;
+      text += `📍 *ROUTE*\n${targetLead.destination || 'Scenic Tour'}\n\n`;
+      text += `${sep}\n\n`;
+
+      if (itin.description) {
+        const days = itin.description.split('\n\n');
+        days.forEach(day => {
+          if (day.trim()) {
+            text += `${day.trim()}\n\n`;
+            text += `${sep}\n\n`;
+          }
+        });
+      }
+
+      if (data.inclusions && data.inclusions.length > 0) {
+        text += `\`INCLUSIONS:\`\n`;
+        data.inclusions.forEach((item: string) => { text += `• ${item}\n`; });
+        text += `\n${sep}\n\n`;
+      }
+      
       if (data.exclusions && data.exclusions.length > 0) {
-        text += `\n\n*❌ Exclusions:*\n` + data.exclusions.map((e: string) => `- ${e}`).join('\n');
+        text += `\`EXCLUSIONS:\`\n`;
+        data.exclusions.forEach((item: string) => { text += `• ${item}\n`; });
+        text += `\n${sep}\n\n`;
       }
     } else {
-      const pricing = Object.entries(itin.pricing_data as Record<string, any>)
-        .map(([k, v]) => `• ${OPTION_META[k]?.label ?? k}: ₹${(v?.price ?? v)?.toLocaleString?.() ?? v}`)
-        .join('\n');
-      text += `\n\n*💰 Pricing:*\n${pricing}`;
+      text += `💰 *PRICING OPTIONS:*\n`;
+      Object.entries(itin.pricing_data as Record<string, any>).forEach(([k, v]) => {
+        text += `• ${OPTION_META[k]?.label ?? k}: $${v?.price_usd ?? '—'} / ₹${(v?.price ?? v)?.toLocaleString()}\n`;
+      });
+      text += `\n${sep}\n\n`;
     }
 
-    text += `\n\n📞 *Contact us to confirm!*`;
+    const allNotes = [];
+    if (itin.important_notes) allNotes.push(itin.important_notes);
+    // Bali Arrival Card link removed from Sales Update stage
+
+    if (allNotes.length > 0) {
+      text += `\`📌 IMPORTANT NOTES:\`\n`;
+      allNotes.forEach(note => { text += `• ${note}\n`; });
+      text += `\n${sep}\n\n`;
+    }
+    
+    text += `*NOMADLLER PVT LTD*\n✨ *Explore the Unexplored*`;
 
     const msg = encodeURIComponent(text);
-    const n = updateLead.contact_no.replace(/\D/g, '');
+    const n = targetLead.contact_no.replace(/\D/g, '');
     Linking.openURL(`whatsapp://send?phone=${n}&text=${msg}`).catch(() =>
       Alert.alert('WhatsApp not installed'));
   }
@@ -382,13 +525,36 @@ export default function FollowupsScreen() {
 
     // For advance_paid → insert confirmed booking
     if (fStatus === 'advance_paid') {
-      const total = parseFloat(fTotal) || 0;
-      const advance = parseFloat(fAdvance) || 0;
-      await supabase.from('confirmed_bookings').insert({
+      const totalUSD = parseFloat(fTotal) || 0;
+      const advanceUSD = parseFloat(fAdvance) || 0;
+      const dueUSD = totalUSD - advanceUSD;
+      
+      // Auto-populate INR fields using liveRate for backend consistency
+      const totalINR = Math.round(totalUSD * liveRate);
+      const advanceINR = Math.round(advanceUSD * liveRate);
+
+      const destObj = destinations.find(d => d.name === updateLead.destination);
+      const ids = destObj?.checklist?.split(',').filter(Boolean) || [];
+      const hasFlights = ids.includes('flights');
+      const hasTrain = ids.includes('train');
+      const hasBus = ids.includes('bus');
+      let activeMode = fTransportMode;
+      // If none selected, fallback to whatever is available
+      if (!activeMode) {
+        if (hasFlights) activeMode = 'flights';
+        else if (hasTrain) activeMode = 'train';
+        else if (hasBus) activeMode = 'bus';
+      }
+
+      const { error: insertError } = await supabase.from('confirmed_bookings').insert({
         lead_id: updateLead.id,
         itinerary_id: updateLead.itinerary_id || null,
-        total_amount: total, advance_paid: advance, due_amount: total - advance,
-        passport_no: fPassportNo, passport_name: fPassportName,
+        total_amount: totalINR, 
+        advance_paid: advanceINR, 
+        due_amount: totalINR - advanceINR,
+        total_amount_usd: totalUSD,
+        due_amount_usd: dueUSD,
+        passport_no: fPassportNo, passport_name: fPassportName, pan_no: fPanNo,
         arr_pnr: fArrPNR,
         arr_flight_no: fArrFlight, arr_dep_place: fArrDepPlace,
         arr_dep_date: fArrDepDate || null, arr_dep_time: fArrDepTime || null,
@@ -397,7 +563,40 @@ export default function FollowupsScreen() {
         dep_flight_no: fDepFlight, dep_dep_place: fDepDepPlace,
         dep_dep_date: fDepDepDate || null, dep_dep_time: fDepDepTime || null,
         dep_arr_airport: fDepArrAirport, dep_arr_date: fDepArrDate || null, dep_arr_time: fDepArrTime || null,
+        arr_train_pnr: fArrTrainPnr, arr_train_no: fArrTrainNo, arr_train_name: fArrTrainName,
+        arr_train_dep_place: fArrTrainDepPlace,
+        arr_train_arr_station: fArrTrainArrStation,
+        arr_train_dep_date: fArrTrainDepDate || null, 
+        arr_train_dep_time: fArrTrainDepTime,
+        arr_train_arr_date: fArrTrainArrDate || null,
+        arr_train_arr_time: fArrTrainArrTime,
+        dep_train_pnr: fDepTrainPnr, dep_train_no: fDepTrainNo, dep_train_name: fDepTrainName,
+        dep_train_dep_place: fDepTrainDepPlace,
+        dep_train_dep_date: fDepTrainDepDate || null, 
+        dep_train_dep_time: fDepTrainDepTime,
+        dep_train_arr_station: fDepTrainArrStation, 
+        dep_train_arr_date: fDepTrainArrDate || null,
+        dep_train_arr_time: fDepTrainArrTime,
+        arr_bus_name: fArrBusName, arr_bus_dep_station: fArrBusDepStation, arr_bus_dep_date: fArrBusDepDate || null, arr_bus_dep_time: fArrBusDepTime,
+        arr_bus_arr_station: fArrBusArrStation, arr_bus_arr_date: fArrBusArrDate || null, arr_bus_arr_time: fArrBusArrTime, arr_bus_operator_contact: fArrBusOperatorContact,
+        dep_bus_name: fDepBusName, dep_bus_dep_station: fDepBusDepStation, dep_bus_dep_date: fDepBusDepDate || null, dep_bus_dep_time: fDepBusDepTime,
+        dep_bus_arr_station: fDepBusArrStation, dep_bus_arr_date: fDepBusArrDate || null, dep_bus_arr_time: fDepBusArrTime, dep_bus_operator_contact: fDepBusOperatorContact,
+        region: fRegion, guest_list: fGuestList, guest_pax: fPax,
+        travel_start_date: (activeMode === 'flights' ? fArrDepDate : (activeMode === 'train' ? fArrTrainDepDate : (activeMode === 'bus' ? fArrBusDepDate : null))) || null,
+        travel_end_date: (activeMode === 'flights' ? fDepArrDate : (activeMode === 'train' ? fDepTrainDepDate : (activeMode === 'bus' ? fDepBusDepDate : null))) || null,
+        checklist: activeMode ? { transport_mode: activeMode } : (
+          (fArrPNR || fDepPNR) ? { transport_mode: 'flights' } : (
+            (fArrTrainNo || fDepTrainNo) ? { transport_mode: 'train' } : (
+              (fArrBusName || fDepBusName) ? { transport_mode: 'bus' } : {}
+            )
+          )
+        ),
       });
+
+      if (insertError) {
+        console.error('Insert Booking Error:', insertError);
+        Alert.alert('Error Saving Booking', 'Lead was converted but booking details failed to save: ' + insertError.message);
+      }
     }
 
     setSaving(false); setUpdateModal(false); fetchFollowups();
@@ -407,6 +606,90 @@ export default function FollowupsScreen() {
       advance_paid: '🎉 Booking Confirmed!', dead: 'Lead marked as Dead.',
     };
     Alert.alert('✅ Saved', msgs[fStatus] ?? 'Updated!');
+  }
+
+  // ── Ticket Parser Logic ──────────────────────────────────────────────────
+  async function handleAutoFill(type: 'arrival' | 'departure') {
+    console.log("AI Auto-fill triggered for:", type);
+    pickFile(type);
+  }
+
+  async function pickImage(type: 'arrival' | 'departure') {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false,
+      quality: 1,
+    });
+    if (!result.canceled) {
+      processTicket(result.assets[0].uri, 'image/jpeg', type);
+    }
+  }
+
+  async function pickFile(type: 'arrival' | 'departure') {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ['application/pdf', 'image/*'],
+    });
+    if (!result.canceled) {
+      processTicket(result.assets[0].uri, result.assets[0].mimeType || 'application/pdf', type);
+    }
+  }
+
+  async function processTicket(uri: string, mime: string, type: 'arrival' | 'departure') {
+    setParsing(true);
+    const data = await parseTicketFile(uri, mime);
+    setParsing(false);
+
+    console.log("✨ AI Raw Data:", data);
+
+    if (data) {
+      const legs = Array.isArray(data) ? data : [data];
+      console.log("🛠️ Processing Legs:", legs);
+
+      legs.forEach((leg, index) => {
+        if (!leg) return;
+        
+        // Auto-switch transport mode based on the first valid leg
+        if (index === 0) {
+          if (leg.transport_type === 'flight') setFTransportMode('flights');
+          else if (leg.transport_type === 'train') setFTransportMode('train');
+          else if (leg.transport_type === 'bus') setFTransportMode('bus');
+        }
+
+        // If we have multiple legs, and this is the second one (index 1), 
+        // OR if the source/destination names suggest it's the return trip,
+        // we fill the Departure section.
+        const isReturn = index === 1 || (legs.length === 1 && type === 'departure');
+
+        if (!isReturn) {
+          // Fill Arrival Section
+          if (leg.pnr) { setFArrPNR(leg.pnr); setFArrTrainPnr(leg.pnr); }
+          if (leg.number) { setFArrFlight(leg.number); setFArrTrainNo(leg.number); }
+          if (leg.name) { setFArrTrainName(leg.name); setFArrBusName(leg.name); }
+          if (leg.operator_contact) { setFArrBusOperatorContact(leg.operator_contact); }
+          if (leg.dep_place) { setFArrDepPlace(leg.dep_place); setFArrTrainDepPlace(leg.dep_place); setFArrBusDepStation(leg.dep_place); }
+          if (leg.dep_date) { setFArrDepDate(leg.dep_date); setFArrTrainDepDate(leg.dep_date); setFArrBusDepDate(leg.dep_date); }
+          if (leg.dep_time) { setFArrDepTime(leg.dep_time); setFArrTrainDepTime(leg.dep_time); setFArrBusDepTime(leg.dep_time); }
+          if (leg.arr_place) { setFArrArrAirport(leg.arr_place); setFArrTrainArrStation(leg.arr_place); setFArrBusArrStation(leg.arr_place); }
+          if (leg.arr_date) { setFArrArrDate(leg.arr_date); setFArrTrainArrDate(leg.arr_date); setFArrBusArrDate(leg.arr_date); }
+          if (leg.arr_time) { setFArrArrTime(leg.arr_time); setFArrTrainArrTime(leg.arr_time); setFArrBusArrTime(leg.arr_time); }
+        } else {
+          // Fill Departure Section
+          if (leg.pnr) { setFDepPNR(leg.pnr); setFDepTrainPnr(leg.pnr); }
+          if (leg.number) { setFDepFlight(leg.number); setFDepTrainNo(leg.number); }
+          if (leg.name) { setFDepTrainName(leg.name); setFDepBusName(leg.name); }
+          if (leg.operator_contact) { setFDepBusOperatorContact(leg.operator_contact); }
+          if (leg.dep_place) { setFDepDepPlace(leg.dep_place); setFDepTrainDepPlace(leg.dep_place); setFDepBusDepStation(leg.dep_place); }
+          if (leg.dep_date) { setFDepDepDate(leg.dep_date); setFDepTrainDepDate(leg.dep_date); setFDepBusDepDate(leg.dep_date); }
+          if (leg.dep_time) { setFDepDepTime(leg.dep_time); setFDepTrainDepTime(leg.dep_time); setFDepBusDepTime(leg.dep_time); }
+          if (leg.arr_place) { setFDepArrAirport(leg.arr_place); setFDepTrainArrStation(leg.arr_place); setFDepBusArrStation(leg.arr_place); }
+          if (leg.arr_date) { setFDepArrDate(leg.arr_date); setFDepTrainArrDate(leg.arr_date); setFDepBusArrDate(leg.arr_date); }
+          if (leg.arr_time) { setFDepArrTime(leg.arr_time); setFDepTrainArrTime(leg.arr_time); setFDepBusArrTime(leg.arr_time); }
+        }
+      });
+      Alert.alert('✨ Success', ` Extracted ${legs.length} journey legs successfully!`);
+    } else {
+      Alert.alert('Error', 'Failed to extract data. Please ensure the ticket is clear.');
+    }
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -643,15 +926,20 @@ export default function FollowupsScreen() {
                       const meta = OPTION_META[k];
                       if (!data || !meta) return null;
                       return (
-                        <View key={k} style={{ borderWidth: 1, borderColor: meta.color + '44', borderRadius: 12, padding: 12, backgroundColor: '#0f172a' }}>
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#1e293b', paddingBottom: 8, marginBottom: 8 }}>
+                        <View key={k} style={{ borderWidth: 1, borderColor: meta.color + '33', borderRadius: R.md, padding: 12, backgroundColor: C.surface2 }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: C.border, paddingBottom: 8, marginBottom: 8 }}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                               <Ionicons name={meta.icon as any} size={16} color={meta.color} />
                               <Text style={{ color: meta.color, fontSize: 13, fontWeight: '700' }}>{meta.label}</Text>
                             </View>
-                            {data.price ? (
-                              <Text style={{ color: '#10b981', fontSize: 15, fontWeight: '800' }}>₹{data.price}</Text>
-                            ) : null}
+                            <View style={{ alignItems: 'flex-end' }}>
+                              {data.price ? (
+                                <Text style={{ color: '#10b981', fontSize: 15, fontWeight: '800' }}>₹{data.price.toLocaleString()}</Text>
+                              ) : null}
+                              {data.price_usd ? (
+                                <Text style={{ color: '#64748b', fontSize: 11, fontWeight: '700', marginTop: 1 }}>${data.price_usd}</Text>
+                              ) : null}
+                            </View>
                           </View>
                           {data.inclusions?.length > 0 && (
                             <View style={{ marginBottom: 6 }}>
@@ -685,7 +973,10 @@ export default function FollowupsScreen() {
 
       {/* ── Follow-up Update Modal ──────────────────────────────────────────── */}
       <Modal visible={updateModal} animationType="slide" presentationStyle="pageSheet">
-        <View style={s.modal}>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+          style={s.modal}
+        >
           <View style={s.modalHeader}>
             <View style={{ flex: 1 }}>
               <Text style={s.modalTitle}>{updateLead?.name ?? 'Update Follow-up'}</Text>
@@ -753,7 +1044,7 @@ export default function FollowupsScreen() {
                       const opts = selItin?.pricing_data ? Object.keys(selItin.pricing_data) : [];
                       if (opts.length > 0) {
                         return (
-                          <View style={{ marginTop: 8, padding: 12, backgroundColor: '#0f172a', borderRadius: 10, borderWidth: 1, borderColor: '#334155' }}>
+                          <View style={{ marginTop: 8, padding: 12, backgroundColor: C.surface2, borderRadius: R.sm, borderWidth: 1, borderColor: C.border }}>
                             <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '700', marginBottom: 8 }}>SELECT TRAVEL OPTION</Text>
                             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                               {opts.map(opt => {
@@ -800,7 +1091,7 @@ export default function FollowupsScreen() {
             {fStatus === 'followup' && (
               <View style={[s.box, { borderColor: '#10b98155' }]}>
                 {updateLead?.call_remarks ? (
-                  <View style={{ marginBottom: 10, padding: 10, backgroundColor: '#0f172a', borderRadius: 8 }}>
+                  <View style={{ marginBottom: 10, padding: 10, backgroundColor: C.surface2, borderRadius: R.xs, borderWidth: 1, borderColor: C.border }}>
                     <Text style={{ color: '#94a3b8', fontSize: 12, marginBottom: 4 }}>Previous Remarks:</Text>
                     <Text style={{ color: '#cbd5e1', fontSize: 13, fontStyle: 'italic' }}>{updateLead.call_remarks}</Text>
                   </View>
@@ -847,50 +1138,255 @@ export default function FollowupsScreen() {
                 </View>
 
                 <Text style={s.subHeading}>💰 Payment</Text>
-                <FField label="Total Amount (₹)" value={fTotal} onChange={setFTotal} placeholder="100000" keyboardType="numeric" />
-                <FField label="Advance Paid (₹)" value={fAdvance} onChange={setFAdvance} placeholder="50000" keyboardType="numeric" />
+                <FField label="Region / Citizens (e.g. Indian, Europe)" value={fRegion} onChange={setFRegion} placeholder="Indian" />
+                <View style={{ gap: 5 }}>
+                  <Text style={s.fieldLabel}>Guest List (Names - one per line)</Text>
+                  <TextInput style={[s.input, { minHeight: 80, textAlignVertical: 'top' }]} value={fGuestList} onChangeText={setFGuestList} placeholder="Siby Khader&#10;Yasmin Khader" multiline numberOfLines={4} placeholderTextColor="#475569" />
+                </View>
+                <FField label="No of PAX" value={fPax} onChange={setFPax} placeholder="2" keyboardType="numeric" />
+               <FField label="Total Amount ($)" value={fTotal} onChange={setFTotal} placeholder="1000" keyboardType="numeric" />
+                <FField label="Advance Paid ($)" value={fAdvance} onChange={setFAdvance} placeholder="500" keyboardType="numeric" />
                 {fTotal && fAdvance ? (
                   <View style={s.dueRow}>
                     <Text style={s.dueLabel}>Due Amount</Text>
-                    <Text style={s.dueAmt}>₹{(parseFloat(fTotal) - parseFloat(fAdvance)).toLocaleString()}</Text>
+                    <Text style={s.dueAmt}>${(parseFloat(fTotal) - parseFloat(fAdvance)).toLocaleString()}</Text>
                   </View>
                 ) : null}
 
                 <Text style={s.subHeading}>🛂 Passport</Text>
                 <FField label="Passport No" value={fPassportNo} onChange={setFPassportNo} placeholder="A1234567" />
                 <FField label="Name (as on Passport)" value={fPassportName} onChange={setFPassportName} placeholder="JOHN DOE" autoCapitalize="characters" />
+                <FField label="PAN Card No" value={fPanNo} onChange={setFPanNo} placeholder="ABCDE1234F" autoCapitalize="characters" />
 
-                <Text style={s.subHeading}>✈️ Arrival Flight (India → Destination)</Text>
-                <View style={s.rowTwo}>
-                  <View style={{ flex: 1 }}><FField label="Arrival PNR" value={fArrPNR} onChange={setFArrPNR} placeholder="PNR" autoCapitalize="characters" /></View>
-                  <View style={{ flex: 1 }}><FField label="Flight No" value={fArrFlight} onChange={setFArrFlight} placeholder="6E 2345" autoCapitalize="characters" /></View>
-                </View>
-                <FField label="Departure Place" value={fArrDepPlace} onChange={setFArrDepPlace} placeholder="Cochin Airport" />
-                <View style={s.rowTwo}>
-                  <View style={{ flex: 1 }}><FField label="Dep Date (YYYY-MM-DD)" value={fArrDepDate} onChange={setFArrDepDate} placeholder="2026-05-10" /></View>
-                  <View style={{ width: 105 }}><FField label="Dep Time" value={fArrDepTime} onChange={setFArrDepTime} placeholder="06:30" /></View>
-                </View>
-                <FField label="Arrival Airport" value={fArrArrAirport} onChange={setFArrArrAirport} placeholder="Denpasar Airport" />
-                <View style={s.rowTwo}>
-                  <View style={{ flex: 1 }}><FField label="Arr Date (YYYY-MM-DD)" value={fArrArrDate} onChange={setFArrArrDate} placeholder="2026-05-10" /></View>
-                  <View style={{ width: 105 }}><FField label="Arr Time" value={fArrArrTime} onChange={setFArrArrTime} placeholder="10:30" /></View>
-                </View>
+                {(() => {
+                  const leadDest = (updateLead?.destination || '').trim().toLowerCase();
+                  const destObj = destinations.find(d => (d.name || '').trim().toLowerCase() === leadDest);
+                  const rawChecklist = destObj?.checklist || '';
+                  const ids = rawChecklist.split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean);
 
-                <Text style={s.subHeading}>✈️ Departure Flight (Destination → India)</Text>
-                <View style={s.rowTwo}>
-                  <View style={{ flex: 1 }}><FField label="Departure PNR" value={fDepPNR} onChange={setFDepPNR} placeholder="PNR" autoCapitalize="characters" /></View>
-                  <View style={{ flex: 1 }}><FField label="Flight No" value={fDepFlight} onChange={setFDepFlight} placeholder="6E 2346" autoCapitalize="characters" /></View>
-                </View>
-                <FField label="Departure Place" value={fDepDepPlace} onChange={setFDepDepPlace} placeholder="Denpasar Airport" />
-                <View style={s.rowTwo}>
-                  <View style={{ flex: 1 }}><FField label="Dep Date (YYYY-MM-DD)" value={fDepDepDate} onChange={setFDepDepDate} placeholder="2026-05-15" /></View>
-                  <View style={{ width: 105 }}><FField label="Dep Time" value={fDepDepTime} onChange={setFDepDepTime} placeholder="14:00" /></View>
-                </View>
-                <FField label="Arrival Airport" value={fDepArrAirport} onChange={setFDepArrAirport} placeholder="Cochin Airport" />
-                <View style={s.rowTwo}>
-                  <View style={{ flex: 1 }}><FField label="Arr Date (YYYY-MM-DD)" value={fDepArrDate} onChange={setFDepArrDate} placeholder="2026-05-15" /></View>
-                  <View style={{ width: 105 }}><FField label="Arr Time" value={fDepArrTime} onChange={setFDepArrTime} placeholder="19:30" /></View>
-                </View>
+                  const hasFlights = ids.includes('flights');
+                  const hasTrain = ids.includes('train');
+                  const hasBus = ids.includes('bus');
+
+                  const transportCount = [hasFlights, hasTrain, hasBus].filter(Boolean).length;
+                  const showSelector = transportCount > 1;
+
+                  const showFlights = hasFlights && (!showSelector || fTransportMode === 'flights');
+                  const showTrain = hasTrain && (!showSelector || fTransportMode === 'train');
+                  const showBus = hasBus && (!showSelector || fTransportMode === 'bus');
+
+                  return (
+                    <>
+                      {transportCount > 0 && !showSelector && <View style={{ height: 10 }} />}
+                      {transportCount > 1 && (
+                        <View style={{ gap: 10, marginTop: 10 }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={s.subHeading}>🔄 Select Transport Mode</Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', gap: 10 }}>
+                             {hasFlights && (
+                             <TouchableOpacity 
+                               style={{ flex: 1, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: fTransportMode === 'flights' ? C.primary : C.border, backgroundColor: fTransportMode === 'flights' ? C.primaryLight : C.surface, alignItems: 'center' }}
+                               onPress={() => setFTransportMode('flights')}
+                             >
+                                <Ionicons name="airplane" size={24} color={fTransportMode === 'flights' ? C.primary : C.textMuted} />
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: fTransportMode === 'flights' ? C.primary : C.textSecond, marginTop: 4 }}>FLIGHT</Text>
+                             </TouchableOpacity>
+                             )}
+                             {hasTrain && (
+                             <TouchableOpacity 
+                               style={{ flex: 1, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: fTransportMode === 'train' ? C.primary : C.border, backgroundColor: fTransportMode === 'train' ? C.primaryLight : C.surface, alignItems: 'center' }}
+                               onPress={() => setFTransportMode('train')}
+                             >
+                                <Ionicons name="train" size={24} color={fTransportMode === 'train' ? C.primary : C.textMuted} />
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: fTransportMode === 'train' ? C.primary : C.textSecond, marginTop: 4 }}>TRAIN</Text>
+                             </TouchableOpacity>
+                             )}
+                             {hasBus && (
+                             <TouchableOpacity 
+                               style={{ flex: 1, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: fTransportMode === 'bus' ? C.primary : C.border, backgroundColor: fTransportMode === 'bus' ? C.primaryLight : C.surface, alignItems: 'center' }}
+                               onPress={() => setFTransportMode('bus')}
+                             >
+                                <Ionicons name="bus" size={24} color={fTransportMode === 'bus' ? C.primary : C.textMuted} />
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: fTransportMode === 'bus' ? C.primary : C.textSecond, marginTop: 4 }}>BUS</Text>
+                             </TouchableOpacity>
+                             )}
+                          </View>
+                        </View>
+                      )}
+
+                      {showFlights && (
+                        <>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 15, marginBottom: 5 }}>
+                            <Text style={s.subHeading}>✈️ Arrival Flight (India → Destination)</Text>
+                            <TouchableOpacity 
+                              style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#8b5cf615', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#8b5cf644' }}
+                              onPress={() => handleAutoFill('arrival')}
+                              disabled={parsing}
+                            >
+                              {parsing ? <ActivityIndicator size="small" color="#8b5cf6" /> : <Ionicons name="sparkles" size={12} color="#8b5cf6" />}
+                              <Text style={{ color: '#8b5cf6', fontSize: 10, fontWeight: '800' }}>✨ AUTO-FILL</Text>
+                            </TouchableOpacity>
+                          </View>
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Arrival PNR" value={fArrPNR} onChange={setFArrPNR} placeholder="PNR" autoCapitalize="characters" /></View>
+                            <View style={{ flex: 1 }}><FField label="Flight No" value={fArrFlight} onChange={setFArrFlight} placeholder="6E 2345" autoCapitalize="characters" /></View>
+                          </View>
+                          <FField label="Departure Place" value={fArrDepPlace} onChange={setFArrDepPlace} placeholder="Cochin Airport" suggestions={TRIP_PLACE_SUGGESTIONS} />
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Dep Date (YYYY-MM-DD)" value={fArrDepDate} onChange={handleArrDepDateChange} placeholder="2026-05-10" /></View>
+                            <View style={{ width: 105 }}><FField label="Dep Time" value={fArrDepTime} onChange={setFArrDepTime} placeholder="06:30" /></View>
+                          </View>
+                          <FField label="Arrival Airport" value={fArrArrAirport} onChange={setFArrArrAirport} placeholder="Denpasar Airport" suggestions={TRIP_PLACE_SUGGESTIONS} />
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Arr Date (YYYY-MM-DD)" value={fArrArrDate} onChange={setFArrArrDate} placeholder="2026-05-10" /></View>
+                            <View style={{ width: 105 }}><FField label="Arr Time" value={fArrArrTime} onChange={setFArrArrTime} placeholder="10:30" /></View>
+                          </View>
+
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 15, marginBottom: 5 }}>
+                            <Text style={s.subHeading}>✈️ Departure Flight (Destination → India)</Text>
+                            <TouchableOpacity 
+                              style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#8b5cf615', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#8b5cf644' }}
+                              onPress={() => handleAutoFill('departure')}
+                              disabled={parsing}
+                            >
+                              {parsing ? <ActivityIndicator size="small" color="#8b5cf6" /> : <Ionicons name="sparkles" size={12} color="#8b5cf6" />}
+                              <Text style={{ color: '#8b5cf6', fontSize: 10, fontWeight: '800' }}>✨ AUTO-FILL</Text>
+                            </TouchableOpacity>
+                          </View>
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Departure PNR" value={fDepPNR} onChange={setFDepPNR} placeholder="PNR" autoCapitalize="characters" /></View>
+                            <View style={{ flex: 1 }}><FField label="Flight No" value={fDepFlight} onChange={setFDepFlight} placeholder="6E 2346" autoCapitalize="characters" /></View>
+                          </View>
+                          <FField label="Departure Place" value={fDepDepPlace} onChange={setFDepDepPlace} placeholder="Denpasar Airport" suggestions={TRIP_PLACE_SUGGESTIONS} />
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Dep Date (YYYY-MM-DD)" value={fDepDepDate} onChange={setFDepDepDate} placeholder="2026-05-15" /></View>
+                            <View style={{ width: 105 }}><FField label="Dep Time" value={fDepDepTime} onChange={setFDepDepTime} placeholder="14:00" /></View>
+                          </View>
+                          <FField label="Arrival Airport" value={fDepArrAirport} onChange={setFDepArrAirport} placeholder="Cochin Airport" suggestions={TRIP_PLACE_SUGGESTIONS} />
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Arr Date (YYYY-MM-DD)" value={fDepArrDate} onChange={setFDepArrDate} placeholder="2026-05-15" /></View>
+                            <View style={{ width: 105 }}><FField label="Arr Time" value={fDepArrTime} onChange={setFDepArrTime} placeholder="19:30" /></View>
+                          </View>
+                        </>
+                      )}
+
+                      {showTrain && (
+                        <>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 15, marginBottom: 5 }}>
+                            <Text style={s.subHeading}>🚆 Arrival Train ({updateLead?.destination})</Text>
+                            <TouchableOpacity 
+                              style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#8b5cf615', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#8b5cf644' }}
+                              onPress={() => handleAutoFill('arrival')}
+                              disabled={parsing}
+                            >
+                              {parsing ? <ActivityIndicator size="small" color="#8b5cf6" /> : <Ionicons name="sparkles" size={12} color="#8b5cf6" />}
+                              <Text style={{ color: '#8b5cf6', fontSize: 10, fontWeight: '800' }}>✨ AUTO-FILL</Text>
+                            </TouchableOpacity>
+                          </View>
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="PNR" value={fArrTrainPnr} onChange={setFArrTrainPnr} placeholder="PNR" autoCapitalize="characters" /></View>
+                            <View style={{ flex: 1 }}><FField label="Train No" value={fArrTrainNo} onChange={setFArrTrainNo} placeholder="12626" /></View>
+                          </View>
+                          <FField label="Train Name" value={fArrTrainName} onChange={setFArrTrainName} placeholder="Kerala Express" />
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Dep Place (India)" value={fArrTrainDepPlace} onChange={setFArrTrainDepPlace} placeholder="New Delhi" suggestions={TRIP_PLACE_SUGGESTIONS} /></View>
+                            <View style={{ flex: 1 }}><FField label="Arr Place" value={fArrTrainArrStation} onChange={setFArrTrainArrStation} placeholder="Manali" suggestions={TRIP_PLACE_SUGGESTIONS} /></View>
+                          </View>
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Dep Date" value={fArrTrainDepDate} onChange={handleArrTrainDepDateChange} placeholder="YYYY-MM-DD" /></View>
+                            <View style={{ width: 105 }}><FField label="Dep Time" value={fArrTrainDepTime} onChange={setFArrTrainDepTime} placeholder="11:30" /></View>
+                          </View>
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Arr Date" value={fArrTrainArrDate} onChange={setFArrTrainArrDate} placeholder="YYYY-MM-DD" /></View>
+                            <View style={{ width: 105 }}><FField label="Arr Time" value={fArrTrainArrTime} onChange={setFArrTrainArrTime} placeholder="19:30" /></View>
+                          </View>
+                          
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 15, marginBottom: 5 }}>
+                            <Text style={[s.subHeading, { marginTop: 0, marginBottom: 0 }]}>🚆 Departure Train (To India)</Text>
+                            <TouchableOpacity onPress={() => {
+                                setFDepTrainPnr(fArrTrainPnr);
+                                setFDepTrainNo(fArrTrainNo);
+                                setFDepTrainName(fArrTrainName);
+                                setFDepTrainDepPlace(fArrTrainArrStation);
+                                setFDepTrainArrStation(fArrTrainDepPlace);
+                            }} style={{ paddingHorizontal: 10, paddingVertical: 4, backgroundColor: C.surface2, borderRadius: 12, borderWidth: 1, borderColor: C.border }}>
+                              <Text style={{ fontSize: 10, color: C.primary, fontWeight: '800' }}>SAME AS ARRIVAL</Text>
+                            </TouchableOpacity>
+                          </View>
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="PNR" value={fDepTrainPnr} onChange={setFDepTrainPnr} placeholder="PNR" autoCapitalize="characters" /></View>
+                            <View style={{ flex: 1 }}><FField label="Train No" value={fDepTrainNo} onChange={setFDepTrainNo} placeholder="12625" /></View>
+                          </View>
+                          <FField label="Train Name" value={fDepTrainName} onChange={setFDepTrainName} placeholder="Kerala Express" />
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Dep Place" value={fDepTrainDepPlace} onChange={setFDepTrainDepPlace} placeholder="Manali" suggestions={TRIP_PLACE_SUGGESTIONS} /></View>
+                            <View style={{ flex: 1 }}><FField label="Arr Station" value={fDepTrainArrStation} onChange={setFDepTrainArrStation} placeholder="New Delhi" suggestions={TRIP_PLACE_SUGGESTIONS} /></View>
+                          </View>
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Dep Date" value={fDepTrainDepDate} onChange={setFDepTrainDepDate} placeholder="YYYY-MM-DD" /></View>
+                            <View style={{ width: 105 }}><FField label="Dep Time" value={fDepTrainDepTime} onChange={setFDepTrainDepTime} placeholder="14:00" /></View>
+                          </View>
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Arr Date" value={fDepTrainArrDate} onChange={setFDepTrainArrDate} placeholder="YYYY-MM-DD" /></View>
+                            <View style={{ width: 105 }}><FField label="Arr Time" value={fDepTrainArrTime} onChange={setFDepTrainArrTime} placeholder="22:00" /></View>
+                          </View>
+                        </>
+                      )}
+
+                      {showBus && (
+                        <>
+                          <Text style={s.subHeading}>🚌 Arrival Bus (To Destination)</Text>
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Bus Name" value={fArrBusName} onChange={setFArrBusName} placeholder="Volvo AC Sleeper" /></View>
+                            <View style={{ flex: 1 }}><FField label="Operator Contact" value={fArrBusOperatorContact} onChange={setFArrBusOperatorContact} placeholder="+91 9876543210" /></View>
+                          </View>
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Dep Station" value={fArrBusDepStation} onChange={setFArrBusDepStation} placeholder="Bangalore" suggestions={TRIP_PLACE_SUGGESTIONS} /></View>
+                            <View style={{ flex: 1 }}><FField label="Arr Station" value={fArrBusArrStation} onChange={setFArrBusArrStation} placeholder="Manali" suggestions={TRIP_PLACE_SUGGESTIONS} /></View>
+                          </View>
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Dep Date" value={fArrBusDepDate} onChange={handleArrBusDepDateChange} placeholder="YYYY-MM-DD" /></View>
+                            <View style={{ width: 105 }}><FField label="Dep Time" value={fArrBusDepTime} onChange={setFArrBusDepTime} placeholder="18:30" /></View>
+                          </View>
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Arr Date" value={fArrBusArrDate} onChange={setFArrBusArrDate} placeholder="YYYY-MM-DD" /></View>
+                            <View style={{ width: 105 }}><FField label="Arr Time" value={fArrBusArrTime} onChange={setFArrBusArrTime} placeholder="06:30" /></View>
+                          </View>
+
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 15, marginBottom: 5 }}>
+                            <Text style={[s.subHeading, { marginTop: 0, marginBottom: 0 }]}>🚌 Departure Bus (To India)</Text>
+                            <TouchableOpacity onPress={() => {
+                                setFDepBusName(fArrBusName);
+                                setFDepBusOperatorContact(fArrBusOperatorContact);
+                                setFDepBusDepStation(fArrBusArrStation);
+                                setFDepBusArrStation(fArrBusDepStation);
+                            }} style={{ paddingHorizontal: 10, paddingVertical: 4, backgroundColor: C.surface2, borderRadius: 12, borderWidth: 1, borderColor: C.border }}>
+                              <Text style={{ fontSize: 10, color: C.primary, fontWeight: '800' }}>SAME AS ARRIVAL</Text>
+                            </TouchableOpacity>
+                          </View>
+
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Bus Name" value={fDepBusName} onChange={setFDepBusName} placeholder="Volvo AC Sleeper" /></View>
+                            <View style={{ flex: 1 }}><FField label="Operator Contact" value={fDepBusOperatorContact} onChange={setFDepBusOperatorContact} placeholder="+91 9876543210" /></View>
+                          </View>
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Dep Station" value={fDepBusDepStation} onChange={setFDepBusDepStation} placeholder="Manali" suggestions={TRIP_PLACE_SUGGESTIONS} /></View>
+                            <View style={{ flex: 1 }}><FField label="Arr Station" value={fDepBusArrStation} onChange={setFDepBusArrStation} placeholder="Bangalore" suggestions={TRIP_PLACE_SUGGESTIONS} /></View>
+                          </View>
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Dep Date" value={fDepBusDepDate} onChange={setFDepBusDepDate} placeholder="YYYY-MM-DD" /></View>
+                            <View style={{ width: 105 }}><FField label="Dep Time" value={fDepBusDepTime} onChange={setFDepBusDepTime} placeholder="19:30" /></View>
+                          </View>
+                          <View style={s.rowTwo}>
+                            <View style={{ flex: 1 }}><FField label="Arr Date" value={fDepBusArrDate} onChange={setFDepBusArrDate} placeholder="YYYY-MM-DD" /></View>
+                            <View style={{ width: 105 }}><FField label="Arr Time" value={fDepBusArrTime} onChange={setFDepBusArrTime} placeholder="08:00" /></View>
+                          </View>
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
               </View>
             )}
             {fStatus === 'dead' && (
@@ -905,7 +1401,7 @@ export default function FollowupsScreen() {
                 : <Text style={s.saveBtnText}>Save Follow-up Update</Text>}
             </TouchableOpacity>
           </ScrollView>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Status picker */}
@@ -930,12 +1426,36 @@ export default function FollowupsScreen() {
 }
 
 // ─── Shared form field ────────────────────────────────────────────────────────
-function FField({ label, value, onChange, placeholder, keyboardType = 'default', autoCapitalize = 'sentences' }: any) {
+function FField({ label, value, onChange, placeholder, keyboardType = 'default', autoCapitalize = 'sentences', suggestions = [] }: any) {
+  const [showSug, setShowSug] = useState(false);
+  const filtered = (value && suggestions.length > 0) ? suggestions.filter((s: string) => s.toLowerCase().includes(value.toLowerCase()) && s !== value).slice(0, 5) : [];
+
   return (
-    <View style={{ gap: 5 }}>
+    <View style={{ gap: 6, marginBottom: 4, zIndex: showSug && filtered.length > 0 ? 100 : 1 }}>
       <Text style={s.fieldLabel}>{label}</Text>
-      <TextInput style={s.input} value={value} onChangeText={onChange} placeholder={placeholder}
-        placeholderTextColor="#475569" keyboardType={keyboardType} autoCapitalize={autoCapitalize} />
+      <TextInput
+        style={s.input}
+        value={value}
+        onChangeText={onChange}
+        placeholder={placeholder}
+        placeholderTextColor="#475569"
+        keyboardType={keyboardType}
+        autoCapitalize={autoCapitalize}
+        onFocus={() => setShowSug(true)}
+        onBlur={() => setTimeout(() => setShowSug(false), 200)}
+      />
+      {showSug && filtered.length > 0 && (
+        <View style={{ position: 'absolute', top: 65, left: 0, right: 0, backgroundColor: C.surface, borderRadius: R.xs, overflow: 'hidden', borderWidth: 1, borderColor: C.border, elevation: 5, zIndex: 1000 }}>
+          {filtered.map((sug: string, i: number) => (
+            <TouchableOpacity key={i} style={{ padding: 12, borderBottomWidth: i === filtered.length - 1 ? 0 : 1, borderBottomColor: C.border }} onPress={() => {
+              onChange(sug);
+              setShowSug(false);
+            }}>
+              <Text style={{ color: C.textPrimary, fontSize: 13 }}>{sug}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -969,82 +1489,84 @@ function DateField({ value, onChange, showPicker, setShowPicker }: {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a' },
-  list: { padding: 16, gap: 14, paddingBottom: 40 },
+  container: { flex: 1, backgroundColor: C.bg },
+  list: { padding: S.lg, gap: 14, paddingBottom: 40 },
   emptyWrap: { alignItems: 'center', marginTop: 80, gap: 10 },
-  emptyTitle: { color: '#475569', fontSize: 17, fontWeight: '700' },
-  emptyText: { color: '#334155', fontSize: 13, textAlign: 'center', maxWidth: 260, lineHeight: 20 },
+  emptyTitle: { color: C.textMuted, fontSize: 17, fontWeight: '700' },
+  emptyText: { color: C.textSecond, fontSize: 13, textAlign: 'center', maxWidth: 260, lineHeight: 20 },
 
   // ── Card ──
   card: {
-    backgroundColor: '#1e293b', borderRadius: 16, padding: 16, gap: 12,
-    borderLeftWidth: 3, borderLeftColor: '#6366f1',
+    backgroundColor: C.surface, borderRadius: R.lg, padding: S.lg, gap: 12,
+    borderLeftWidth: 3, borderLeftColor: C.primary,
+    borderWidth: 1, borderColor: C.border,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2,
   },
   cardTop: { flexDirection: 'row', gap: 12, alignItems: 'center' },
   avatar: {
-    width: 46, height: 46, borderRadius: 23, backgroundColor: '#0f172a',
+    width: 46, height: 46, borderRadius: 23, backgroundColor: C.primaryLight,
     borderWidth: 2, justifyContent: 'center', alignItems: 'center',
   },
-  avatarText: { color: '#94a3b8', fontSize: 20, fontWeight: '700' },
+  avatarText: { color: C.primary, fontSize: 20, fontWeight: '800' },
   cardMid: { flex: 1, gap: 4 },
-  leadName: { color: '#f8fafc', fontSize: 16, fontWeight: '800' },
+  leadName: { color: C.textPrimary, fontSize: 16, fontWeight: '800' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  contact: { color: '#10b981', fontSize: 13, fontWeight: '600' },
-  meta: { color: '#94a3b8', fontSize: 13 },
+  contact: { color: C.green, fontSize: 13, fontWeight: '600' },
+  meta: { color: C.textMuted, fontSize: 13 },
   countdownBadge: {
-    borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8,
+    borderWidth: 1.5, borderRadius: R.md, paddingHorizontal: 10, paddingVertical: 8,
     alignItems: 'center', gap: 2, minWidth: 68,
   },
   countdownDate: { fontSize: 13, fontWeight: '800' },
   countdownLabel: { fontSize: 12, fontWeight: '700' },
   countdownTime: { fontSize: 10 },
   cardMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderRadius: R.full, paddingHorizontal: 10, paddingVertical: 4 },
   pillText: { fontSize: 11, fontWeight: '700' },
-  remarksText: { color: '#475569', fontSize: 12, fontStyle: 'italic', flex: 1 },
+  remarksText: { color: C.textMuted, fontSize: 12, fontStyle: 'italic', flex: 1 },
   actionRow: { flexDirection: 'row', gap: 8 },
-  btn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 10, borderRadius: 10 },
+  btn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 10, borderRadius: R.sm },
   callBtn: { backgroundColor: '#2563eb' },
   waBtn: { backgroundColor: '#16a34a' },
-  updateBtn: { backgroundColor: '#6366f1' },
+  updateBtn: { backgroundColor: C.primary },
   btnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
 
   // ── Modal ──
-  modal: { flex: 1, backgroundColor: '#0f172a' },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', padding: 20, paddingTop: 24, borderBottomWidth: 1, borderBottomColor: '#1e293b', gap: 12 },
-  modalTitle: { color: '#f8fafc', fontSize: 18, fontWeight: '800' },
-  modalSub: { color: '#10b981', fontSize: 13, fontWeight: '600', marginTop: 2 },
-  durationBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#10b98122', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: '#10b98155' },
-  durationText: { color: '#10b981', fontSize: 12, fontWeight: '700' },
-  formContent: { padding: 20, gap: 14, paddingBottom: 40 },
-  fieldLabel: { color: '#94a3b8', fontSize: 13, fontWeight: '600' },
-  dropdown: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#1e293b', borderRadius: 10, padding: 14, borderWidth: 1.5, borderColor: '#334155' },
-  dropdownText: { color: '#475569', fontSize: 14 },
-  box: { borderWidth: 1.5, borderRadius: 14, padding: 14, gap: 10 },
-  filterRow: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#0f172a', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: '#334155' },
-  filterInput: { flex: 1, color: '#f8fafc', fontSize: 14 },
-  itinRow: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#0f172a', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#334155' },
-  itinRowActive: { borderColor: '#f59e0b' },
-  itinRowText: { color: '#cbd5e1', fontSize: 14, fontWeight: '600', flex: 1 },
-  dateBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#0f172a', borderRadius: 10, padding: 13, borderWidth: 1, borderColor: '#334155' },
-  dateBtnText: { color: '#475569', fontSize: 14 },
-  input: { backgroundColor: '#0f172a', color: '#f8fafc', borderRadius: 10, padding: 13, fontSize: 14, borderWidth: 1, borderColor: '#334155' },
-  hint: { color: '#475569', fontSize: 13, fontStyle: 'italic', lineHeight: 19 },
-  saveBtn: { backgroundColor: '#10b981', borderRadius: 12, paddingVertical: 15, alignItems: 'center', marginTop: 4 },
+  modal: { flex: 1, backgroundColor: C.bg },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', padding: S.xl, paddingTop: S.xxl, borderBottomWidth: 1, borderBottomColor: C.border, gap: 12, backgroundColor: C.surface },
+  modalTitle: { color: C.textPrimary, fontSize: 18, fontWeight: '800' },
+  modalSub: { color: C.green, fontSize: 13, fontWeight: '600', marginTop: 2 },
+  durationBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.greenLight, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: C.green + '55' },
+  durationText: { color: C.green, fontSize: 12, fontWeight: '700' },
+  formContent: { padding: S.xl, gap: 14, paddingBottom: 40 },
+  fieldLabel: { color: C.textSecond, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  dropdown: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.surface2, borderRadius: R.sm, padding: 14, borderWidth: 1.5, borderColor: C.border },
+  dropdownText: { color: C.textMuted, fontSize: 14 },
+  box: { borderWidth: 1.5, borderRadius: R.lg, padding: 14, gap: 10 },
+  filterRow: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.surface2, borderRadius: R.sm, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: C.border },
+  filterInput: { flex: 1, color: C.textPrimary, fontSize: 14 },
+  itinRow: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.surface2, borderRadius: R.sm, padding: 12, borderWidth: 1, borderColor: C.border },
+  itinRowActive: { borderColor: C.amber },
+  itinRowText: { color: C.textSecond, fontSize: 14, fontWeight: '600', flex: 1 },
+  dateBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.surface2, borderRadius: R.sm, padding: 13, borderWidth: 1, borderColor: C.border },
+  dateBtnText: { color: C.textMuted, fontSize: 14 },
+  input: { backgroundColor: C.surface2, color: C.textPrimary, borderRadius: R.sm, padding: 13, fontSize: 14, borderWidth: 1.5, borderColor: C.border },
+  hint: { color: C.textMuted, fontSize: 13, fontStyle: 'italic', lineHeight: 19 },
+  saveBtn: { backgroundColor: C.green, borderRadius: R.md, paddingVertical: 15, alignItems: 'center', marginTop: 4, shadowColor: C.green, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 6 },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  overlay: { flex: 1, backgroundColor: '#00000099', justifyContent: 'flex-end' },
-  pickerSheet: { backgroundColor: '#1e293b', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 2, paddingBottom: 40 },
-  pickerTitle: { color: '#94a3b8', fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 },
-  pickerItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 13, paddingHorizontal: 10, borderRadius: 10 },
-  pickerItemText: { flex: 1, color: '#cbd5e1', fontSize: 15 },
+  overlay: { flex: 1, backgroundColor: '#00000044', justifyContent: 'flex-end' },
+  pickerSheet: { backgroundColor: C.surface, borderTopLeftRadius: R.xxl, borderTopRightRadius: R.xxl, padding: S.xl, gap: 2, paddingBottom: 40, borderTopWidth: 1, borderColor: C.border },
+  pickerTitle: { color: C.textMuted, fontSize: 11, fontWeight: '800', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: S.sm },
+  pickerItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 13, paddingHorizontal: 10, borderRadius: R.sm },
+  pickerItemText: { flex: 1, color: C.textSecond, fontSize: 15 },
   boxHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  boxTitle: { color: '#10b981', fontSize: 14, fontWeight: '700' },
-  subHeading: { color: '#cbd5e1', fontSize: 13, fontWeight: '700', marginTop: 4 },
-  dueRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0f172a', borderRadius: 10, padding: 12 },
-  dueLabel: { color: '#94a3b8', fontSize: 13 },
-  dueAmt: { color: '#f59e0b', fontSize: 17, fontWeight: '700' },
+  boxTitle: { color: C.green, fontSize: 14, fontWeight: '700' },
+  subHeading: { color: C.textPrimary, fontSize: 13, fontWeight: '800', marginTop: 4 },
+  dueRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: C.surface2, borderRadius: R.sm, padding: 12, borderWidth: 1, borderColor: C.border },
+  dueLabel: { color: C.textMuted, fontSize: 13 },
+  dueAmt: { color: C.amber, fontSize: 17, fontWeight: '700' },
   rowTwo: { flexDirection: 'row', gap: 8 },
   detailRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
-  detailText: { color: '#94a3b8', fontSize: 15 },
-  callLogBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#0f172a', padding: 12, borderRadius: 10, marginTop: 10, borderWidth: 1, borderColor: '#334155' },
+  detailText: { color: C.textSecond, fontSize: 15 },
+  callLogBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.surface2, padding: 12, borderRadius: R.sm, marginTop: 10, borderWidth: 1, borderColor: C.border },
 });

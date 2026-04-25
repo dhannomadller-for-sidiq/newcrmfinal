@@ -6,6 +6,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { supabase } from '@/utils/supabase';
+import { C, R, S } from '@/lib/theme';
+import { getLiveUsdRate } from '@/utils/liveRate';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 type Destination = {
@@ -13,11 +15,12 @@ type Destination = {
   options_car: boolean; options_bike: boolean; options_cab: boolean;
 };
 
-type OptionData = { inclusions: string[]; exclusions: string[]; price: string };
+type OptionData = { inclusions: string[]; exclusions: string[]; price: string; price_usd?: string };
 type OptionsMap = { car?: OptionData; bike?: OptionData; cab?: OptionData };
 
 type Itinerary = {
   description?: string;
+  important_notes?: string;
   id: string; title: string; destination_id: string;
   inclusions: string[]; exclusions: string[];
   pricing_data: Record<string, unknown>;
@@ -33,7 +36,7 @@ const OPTION_META = {
 type OptionKey = keyof typeof OPTION_META;
 
 function emptyOption(): OptionData {
-  return { inclusions: [], exclusions: [], price: '' };
+  return { inclusions: [], exclusions: [], price: '', price_usd: '' };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -43,10 +46,12 @@ export default function ItinerariesScreen() {
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [editItinId, setEditItinId] = useState<string | null>(null);
+  const [liveRate, setLiveRate] = useState<number | null>(null);
 
   // ── Form state ──────────────────────────────────────────────────────────
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [importantNotes, setImportantNotes] = useState('');
   const [destId, setDestId] = useState('');
   const [destPickerOpen, setDestPickerOpen] = useState(false);
   const [optionsMap, setOptionsMap] = useState<OptionsMap>({});
@@ -61,12 +66,14 @@ export default function ItinerariesScreen() {
 
   async function fetchAll() {
     setLoading(true);
-    const [itin, dest] = await Promise.all([
+    const [itin, dest, rate] = await Promise.all([
       supabase.from('itineraries').select('*').order('created_at', { ascending: false }),
       supabase.from('destinations').select('*').order('name'),
+      getLiveUsdRate(),
     ]);
     setItineraries(itin.data ?? []);
     setDestinations(dest.data ?? []);
+    setLiveRate(rate);
     setLoading(false);
   }
 
@@ -120,7 +127,16 @@ export default function ItinerariesScreen() {
     }));
   }
 
-  function setPrice(key: OptionKey, val: string) {
+  function setPriceUSD(key: OptionKey, usdVal: string) {
+    const activeRate = (liveRate ?? 95) + 2;
+    const inrVal = usdVal ? (parseFloat(usdVal) * activeRate).toFixed(0) : '';
+    setOptionsMap(prev => ({ 
+      ...prev, 
+      [key]: { ...prev[key]!, price_usd: usdVal, price: inrVal } 
+    }));
+  }
+
+  function setPriceINR(key: OptionKey, val: string) {
     setOptionsMap(prev => ({ ...prev, [key]: { ...prev[key]!, price: val } }));
   }
 
@@ -144,6 +160,7 @@ export default function ItinerariesScreen() {
         inclusions: opt.inclusions,
         exclusions: opt.exclusions,
         price: opt.price ? parseFloat(opt.price) : 0,
+        price_usd: opt.price_usd ? parseFloat(opt.price_usd) : null,
       };
     }
 
@@ -151,6 +168,7 @@ export default function ItinerariesScreen() {
     const payload = {
       title: title.trim(),
       description: description.trim() || null,
+      important_notes: importantNotes.trim() || null,
       destination_id: destId,
       inclusions: [],
       exclusions: [],
@@ -177,6 +195,7 @@ export default function ItinerariesScreen() {
     setEditItinId(item.id);
     setTitle(item.title);
     setDescription(item.description ?? '');
+    setImportantNotes(item.important_notes ?? '');
     setDestId(item.destination_id);
     
     // Restore options form state
@@ -186,6 +205,7 @@ export default function ItinerariesScreen() {
       if (d) {
         restoredMap[k] = {
           price: d.price?.toString() ?? '',
+          price_usd: d.price_usd?.toString() ?? '',
           inclusions: d.inclusions ?? [],
           exclusions: d.exclusions ?? []
         };
@@ -198,7 +218,7 @@ export default function ItinerariesScreen() {
   }
 
   function resetForm() {
-    setEditItinId(null); setTitle(''); setDescription(''); setDestId(''); setOptionsMap({});
+    setEditItinId(null); setTitle(''); setDescription(''); setImportantNotes(''); setDestId(''); setOptionsMap({});
     setIncInputs({}); setExcInputs({});
   }
 
@@ -213,21 +233,59 @@ export default function ItinerariesScreen() {
   function handleCopyItinerary(itin: Itinerary, optKey: OptionKey) {
     const meta = OPTION_META[optKey];
     const data = itin.pricing_data[optKey] as OptionData | undefined;
-    if (!data) return;
+    if (!data || !meta) return;
 
-    let text = `*${itin.title} WITH ${(meta?.label ?? optKey).toUpperCase()}*\n📍 ${getDestName(itin.destination_id)}\n`;
-    if (itin.description) text += `\n${itin.description}\n`;
-    text += `\n*💰 Price:* ₹${data.price}\n`;
+    const isBali = (itin.title + (itin.description || '')).toLowerCase().includes('bali');
+    const sep = "━━━━━━━━━━━━━━━━━━";
+    
+    let text = `🌴 *NOMADLLER PVT LTD – ${getDestName(itin.destination_id).toUpperCase()}* 🇮🇩\n\n`;
+    text += `✨ *${itin.title} WITH ${meta.label.toUpperCase()}*\n\n`;
+    
+    text += `💰 *PACKAGE COST:*\n`;
+    if (data?.price_usd) {
+      text += `• USD ${data.price_usd.toLocaleString()} per person\n\n`;
+    } else {
+      text += `• ₹${(data?.price || 0).toLocaleString()}\n\n`;
+    }
+    
+    text += `👥 *Pax:* 2 Adults (Standard)\n`;
+    text += `📅 *Travel Dates:* As per availability\n\n`;
+    text += `${sep}\n\n`;
+    text += `📍 *ROUTE*\n${getDestName(itin.destination_id)}\n\n`;
+    text += `${sep}\n\n`;
+
+    if (itin.description) {
+      const days = itin.description.split('\n\n');
+      days.forEach(day => {
+        if (day.trim()) {
+          text += `${day.trim()}\n\n`;
+          text += `${sep}\n\n`;
+        }
+      });
+    }
 
     if (data.inclusions && data.inclusions.length > 0) {
-      text += `\n*✅ Inclusions:*\n` + data.inclusions.map(i => `- ${i}`).join('\n');
+      text += `\`INCLUSIONS:\`\n`;
+      data.inclusions.forEach((item: string) => { text += `• ${item}\n`; });
+      text += `\n${sep}\n\n`;
     }
+    
     if (data.exclusions && data.exclusions.length > 0) {
-      text += `\n*❌ Exclusions:*\n` + data.exclusions.map(e => `- ${e}`).join('\n');
+      text += `\`EXCLUSIONS:\`\n`;
+      data.exclusions.forEach((item: string) => { text += `• ${item}\n`; });
+      text += `\n${sep}\n\n`;
     }
 
+    if (itin.important_notes) {
+      text += `\`📌 IMPORTANT NOTES:\`\n`;
+      text += `• ${itin.important_notes}\n`;
+      text += `\n${sep}\n\n`;
+    }
+    
+    text += `*NOMADLLER PVT LTD*\n✨ *Explore the Unexplored*`;
+
     Clipboard.setStringAsync(text);
-    Alert.alert('✅ Copied!', `${meta?.label ?? optKey} details copied to clipboard.`);
+    Alert.alert('✅ Copied!', `${meta?.label ?? optKey} details copied to clipboard in Premium Format.`);
   }
 
   // ── Render list card ──────────────────────────────────────────────────────
@@ -241,8 +299,8 @@ export default function ItinerariesScreen() {
             <Text style={styles.destText}>{getDestName(item.destination_id)}</Text>
           </View>
         </View>
-        <TouchableOpacity onPress={() => handleEditClick(item)} style={{ padding: 6, backgroundColor: '#334155', borderRadius: 8 }}>
-          <Ionicons name="create-outline" size={18} color="#cbd5e1" />
+        <TouchableOpacity onPress={() => handleEditClick(item)} style={{ padding: 6, backgroundColor: C.primaryLight, borderRadius: 8 }}>
+          <Ionicons name="create-outline" size={18} color={C.primary} />
         </TouchableOpacity>
       </View>
       {Object.keys(item.pricing_data).length > 0 && (
@@ -252,29 +310,34 @@ export default function ItinerariesScreen() {
             const meta = OPTION_META[k];
             if (!data || !meta) return null;
             return (
-              <View key={k} style={{ borderWidth: 1, borderColor: meta.color + '44', borderRadius: 12, padding: 12, backgroundColor: '#0f172a' }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#1e293b', paddingBottom: 8, marginBottom: 8 }}>
+              <View key={k} style={{ borderWidth: 1, borderColor: meta.color + '33', borderRadius: R.md, padding: 12, backgroundColor: C.surface2 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: C.border, paddingBottom: 8, marginBottom: 8 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Ionicons name={meta.icon as any} size={16} color={meta.color} />
                     <Text style={{ color: meta.color, fontSize: 13, fontWeight: '700' }}>{meta.label}</Text>
                   </View>
-                  {data.price ? (
-                    <Text style={{ color: '#10b981', fontSize: 15, fontWeight: '800' }}>₹{data.price}</Text>
-                  ) : null}
+                  <View style={{ alignItems: 'flex-end' }}>
+                    {data.price ? (
+                      <Text style={{ color: C.green, fontSize: 15, fontWeight: '800' }}>₹{data.price}</Text>
+                    ) : null}
+                    {data.price_usd ? (
+                      <Text style={{ color: C.textMuted, fontSize: 11, fontWeight: '600', marginTop: 1 }}>${data.price_usd}</Text>
+                    ) : null}
+                  </View>
                 </View>
                 {data.inclusions?.length > 0 && (
                   <View style={{ marginBottom: 6 }}>
-                    <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700', marginBottom: 2 }}>INCLUSIONS</Text>
+                    <Text style={{ color: C.textMuted, fontSize: 10, fontWeight: '800', marginBottom: 2, textTransform: 'uppercase' }}>INCLUSIONS</Text>
                     {data.inclusions.map((inc, i) => (
-                      <Text key={`inc-${i}`} style={{ color: '#cbd5e1', fontSize: 12, marginBottom: 1 }}>• {inc}</Text>
+                      <Text key={`inc-${i}`} style={{ color: C.textSecond, fontSize: 12, marginBottom: 1 }}>• {inc}</Text>
                     ))}
                   </View>
                 )}
                 {data.exclusions?.length > 0 && (
                   <View style={{ marginBottom: 10 }}>
-                    <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700', marginBottom: 2 }}>EXCLUSIONS</Text>
+                    <Text style={{ color: C.textMuted, fontSize: 10, fontWeight: '800', marginBottom: 2, textTransform: 'uppercase' }}>EXCLUSIONS</Text>
                     {data.exclusions.map((exc, i) => (
-                      <Text key={`exc-${i}`} style={{ color: '#64748b', fontSize: 12, marginBottom: 1 }}>• {exc}</Text>
+                      <Text key={`exc-${i}`} style={{ color: C.red, fontSize: 12, marginBottom: 1 }}>• {exc}</Text>
                     ))}
                   </View>
                 )}
@@ -303,14 +366,30 @@ export default function ItinerariesScreen() {
           <Text style={[styles.optionHeaderText, { color: meta.color }]}>{meta.label}</Text>
         </View>
 
-        {/* Price */}
+        {/* Price USD */}
         <View style={styles.fieldGroup}>
-          <Text style={styles.subLabel}>💰 Price (₹)</Text>
+          <Text style={styles.subLabel}>💰 Price ($ USD)</Text>
           <TextInput
             style={styles.input}
+            value={opt.price_usd}
+            onChangeText={v => setPriceUSD(key, v)}
+            placeholder="e.g. 300"
+            placeholderTextColor="#475569"
+            keyboardType="numeric"
+          />
+        </View>
+
+        {/* Price INR (Auto) */}
+        <View style={styles.fieldGroup}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={styles.subLabel}>₹ Price (Calculated INR)</Text>
+            <Text style={{ fontSize: 10, color: C.textMuted }}>Rate used: {liveRate ? liveRate + 2 : '—'}</Text>
+          </View>
+          <TextInput
+            style={[styles.input, { backgroundColor: C.bg, opacity: 0.8 }]}
             value={opt.price}
-            onChangeText={v => setPrice(key, v)}
-            placeholder="e.g. 25000"
+            onChangeText={v => setPriceINR(key, v)}
+            placeholder="Auto-calculated"
             placeholderTextColor="#475569"
             keyboardType="numeric"
           />
@@ -424,6 +503,21 @@ export default function ItinerariesScreen() {
               />
             </View>
 
+            {/* Important Notes */}
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>📌 Important Notes</Text>
+              <TextInput
+                style={[styles.input, styles.textArea, { minHeight: 80 }]}
+                value={importantNotes}
+                onChangeText={setImportantNotes}
+                placeholder="e.g. Original ID card required, carry heavy woolens, etc."
+                placeholderTextColor="#475569"
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+              />
+            </View>
+
             {/* ── Destination Dropdown ─────────────────────────────────── */}
             <View style={styles.fieldGroup}>
               <Text style={styles.fieldLabel}>Destination *</Text>
@@ -488,61 +582,61 @@ export default function ItinerariesScreen() {
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a' },
-  list: { padding: 16, gap: 12 },
+  container: { flex: 1, backgroundColor: C.bg },
+  list: { padding: S.lg, gap: S.sm },
 
   // List card
-  card: { backgroundColor: '#1e293b', borderRadius: 14, padding: 16, gap: 8 },
-  iTitle: { color: '#f8fafc', fontSize: 17, fontWeight: '700' },
+  card: { backgroundColor: C.surface, borderRadius: R.lg, padding: S.lg, gap: S.sm, borderWidth: 1, borderColor: C.border, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  iTitle: { color: C.textPrimary, fontSize: 17, fontWeight: '800' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  destText: { color: '#6366f1', fontSize: 13 },
+  destText: { color: C.primary, fontSize: 13, fontWeight: '600' },
   optionBadgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  optionBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 4 },
+  optionBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: R.full, paddingHorizontal: 8, paddingVertical: 4 },
   optionBadgeText: { fontSize: 11, fontWeight: '600' },
-  empty: { color: '#475569', textAlign: 'center', marginTop: 60, fontSize: 15 },
+  empty: { color: C.textMuted, textAlign: 'center', marginTop: 60, fontSize: 15 },
 
-  fab: { position: 'absolute', bottom: 24, right: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: '#6366f1', justifyContent: 'center', alignItems: 'center', shadowColor: '#6366f1', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 12, elevation: 8 },
+  fab: { position: 'absolute', bottom: 24, right: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: C.primary, justifyContent: 'center', alignItems: 'center', shadowColor: C.primary, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 14, elevation: 8 },
 
   // Modal
-  modal: { flex: 1, backgroundColor: '#0f172a' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 24, borderBottomWidth: 1, borderBottomColor: '#1e293b' },
-  modalTitle: { color: '#f8fafc', fontSize: 20, fontWeight: '700' },
-  formContent: { padding: 20, gap: 16, paddingBottom: 40 },
-  fieldGroup: { gap: 6 },
-  fieldLabel: { color: '#94a3b8', fontSize: 13, fontWeight: '600' },
-  input: { backgroundColor: '#1e293b', color: '#f8fafc', borderRadius: 10, padding: 14, fontSize: 15, borderWidth: 1, borderColor: '#334155' },
+  modal: { flex: 1, backgroundColor: C.bg },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: S.xl, paddingTop: S.xxl, borderBottomWidth: 1, borderBottomColor: C.border, backgroundColor: C.surface },
+  modalTitle: { color: C.textPrimary, fontSize: 20, fontWeight: '800' },
+  formContent: { padding: S.xl, gap: S.lg, paddingBottom: 40 },
+  fieldGroup: { gap: S.xs },
+  fieldLabel: { color: C.textSecond, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  input: { backgroundColor: C.surface2, color: C.textPrimary, borderRadius: R.sm, padding: 14, fontSize: 15, borderWidth: 1.5, borderColor: C.border },
   textArea: { minHeight: 130, lineHeight: 22 },
 
   // Dropdown
-  dropdown: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#1e293b', borderRadius: 10, padding: 14, borderWidth: 1, borderColor: '#334155' },
-  dropdownText: { flex: 1, color: '#475569', fontSize: 15 },
-  dropdownTextSelected: { color: '#f8fafc', fontWeight: '600' },
+  dropdown: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.surface2, borderRadius: R.sm, padding: 14, borderWidth: 1.5, borderColor: C.border },
+  dropdownText: { flex: 1, color: C.textMuted, fontSize: 15 },
+  dropdownTextSelected: { color: C.textPrimary, fontWeight: '700' },
 
   // Per-option section
-  optionSection: { borderWidth: 1.5, borderRadius: 14, padding: 14, gap: 10 },
-  optionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 10, padding: 10 },
-  optionHeaderText: { fontSize: 15, fontWeight: '700' },
-  subLabel: { color: '#94a3b8', fontSize: 12, fontWeight: '600' },
+  optionSection: { borderWidth: 1.5, borderRadius: R.lg, padding: S.md, gap: S.sm },
+  optionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: R.sm, padding: 10 },
+  optionHeaderText: { fontSize: 15, fontWeight: '800' },
+  subLabel: { color: C.textMuted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   addRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  addBtn: { borderRadius: 10, padding: 12 },
-  tagRow: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#0f172a', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7 },
-  tagText: { color: '#cbd5e1', fontSize: 13, flex: 1 },
+  addBtn: { borderRadius: R.sm, padding: 12 },
+  tagRow: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.bg, borderRadius: R.xs, paddingHorizontal: 10, paddingVertical: 7, borderWidth: 1, borderColor: C.border },
+  tagText: { color: C.textSecond, fontSize: 13, flex: 1 },
 
   // No options hint
-  noOptionsHint: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', backgroundColor: '#1e293b', borderRadius: 10, padding: 14 },
-  noOptionsText: { color: '#f59e0b', fontSize: 13, flex: 1, lineHeight: 20 },
+  noOptionsHint: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', backgroundColor: C.amberLight, borderRadius: R.sm, padding: 14, borderWidth: 1, borderColor: C.amber + '44' },
+  noOptionsText: { color: C.amber, fontSize: 13, flex: 1, lineHeight: 20 },
 
   // Save
-  saveBtn: { backgroundColor: '#6366f1', borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
-  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  saveBtn: { backgroundColor: C.primary, borderRadius: R.md, paddingVertical: 15, alignItems: 'center', shadowColor: C.primary, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 6 },
+  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
 
   // Destination picker overlay
-  overlay: { flex: 1, backgroundColor: '#00000088', justifyContent: 'flex-end' },
-  pickerSheet: { backgroundColor: '#1e293b', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 4, paddingBottom: 40 },
-  pickerTitle: { color: '#94a3b8', fontSize: 13, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 },
-  pickerItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 14, paddingHorizontal: 12, borderRadius: 10 },
-  pickerItemActive: { backgroundColor: '#6366f122' },
-  pickerItemText: { flex: 1, color: '#cbd5e1', fontSize: 16 },
-  pickerItemTextActive: { color: '#f8fafc', fontWeight: '700' },
+  overlay: { flex: 1, backgroundColor: '#00000044', justifyContent: 'flex-end' },
+  pickerSheet: { backgroundColor: C.surface, borderTopLeftRadius: R.xxl, borderTopRightRadius: R.xxl, padding: S.xl, gap: 4, paddingBottom: 40, borderTopWidth: 1, borderColor: C.border },
+  pickerTitle: { color: C.textMuted, fontSize: 11, fontWeight: '800', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: S.sm },
+  pickerItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 14, paddingHorizontal: 12, borderRadius: R.sm },
+  pickerItemActive: { backgroundColor: C.primaryLight },
+  pickerItemText: { flex: 1, color: C.textSecond, fontSize: 16 },
+  pickerItemTextActive: { color: C.primary, fontWeight: '800' },
   optionFlags: { flexDirection: 'row', gap: 4 },
 });

@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Modal, TextInput, ActivityIndicator, Alert, ScrollView,
+  Modal, TextInput, ActivityIndicator, Alert, ScrollView, RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/utils/supabase';
 import { STATUS_COLORS, FOLLOWUP_STATUSES, FUP_COLORS, FUP_LABELS, OPTION_META } from '@/lib/salesConstants';
+import { C, R, S } from '@/lib/theme';
 
 type Lead = {
   id: string;
@@ -21,6 +23,7 @@ type Lead = {
   itinerary_option: string | null;
   itinerary_history: any[] | null;
   call_remarks: string | null;
+  next_followup_at?: string | null;
   assigned_to_profile?: { name: string | null };
 };
 
@@ -39,6 +42,13 @@ export default function LeadsScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
   const [reassignModal, setReassignModal] = useState(false);
+  const { filter } = useLocalSearchParams<{ filter?: string }>();
+  const [activeFilter, setActiveFilter] = useState<string | null>(filter || null);
+
+  useEffect(() => {
+    if (filter) setActiveFilter(filter);
+  }, [filter]);
+
   const [reassignLeadId, setReassignLeadId] = useState('');
   const [reassignTo, setReassignTo] = useState('');
 
@@ -68,15 +78,31 @@ export default function LeadsScreen() {
     setItineraries(data ?? []);
   }
 
+  const [refreshing, setRefreshing] = useState(false);
+
   async function fetchLeads() {
+    console.log('fetchLeads called...');
     setLoading(true);
-    const [all, returned] = await Promise.all([
-      supabase.from('leads').select('*, assigned_to_profile:profiles(name)').eq('returned_to_admin', false).order('created_at', { ascending: false }),
-      supabase.from('leads').select('*, assigned_to_profile:profiles(name)').eq('returned_to_admin', true).order('created_at', { ascending: false }),
-    ]);
-    setLeads(all.data as any[] ?? []);
-    setReturnedLeads(returned.data as any[] ?? []);
+    try {
+      const { data, error } = await supabase.from('leads').select('*, assigned_to_profile:profiles!assigned_to(name)').order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error('Lead Fetch Error:', error);
+        Alert.alert('Fetch Error', error.message);
+      }
+
+      console.log('Fetched data length:', data?.length);
+      
+      if (data) {
+        setLeads(data.filter(l => !l.returned_to_admin));
+        setReturnedLeads(data.filter(l => l.returned_to_admin));
+      }
+    } catch (err: any) {
+      console.error('Fetch leads catch error:', err);
+      Alert.alert('Fetch Catch', err.message || 'Unknown error');
+    }
     setLoading(false);
+    setRefreshing(false);
   }
 
   async function fetchSalespersons() {
@@ -129,14 +155,25 @@ export default function LeadsScreen() {
     setCallHistory(data ?? []);
   }
 
-  const filteredLeads = leads.filter(l => 
-    l.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    l.contact_no.includes(searchQuery)
-  );
+  const filteredLeads = leads.filter(l => {
+    const matchesSearch = (l.name?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false) || 
+                          (l.contact_no?.includes(searchQuery) ?? false);
+    if (!matchesSearch) return false;
+
+    if (activeFilter === 'today') {
+      if (!l.next_followup_at) return false;
+      const fDate = new Date(l.next_followup_at);
+      const today = new Date();
+      return fDate.getFullYear() === today.getFullYear() &&
+             fDate.getMonth() === today.getMonth() &&
+             fDate.getDate() === today.getDate();
+    }
+    return true;
+  });
   
   const filteredReturned = returnedLeads.filter(l => 
-    l.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    l.contact_no.includes(searchQuery)
+    (l.name?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false) || 
+    (l.contact_no?.includes(searchQuery) ?? false)
   );
 
   const renderLead = ({ item }: { item: Lead }) => (
@@ -165,10 +202,13 @@ export default function LeadsScreen() {
 
   return (
     <View style={styles.container}>
-      {loading ? (
+      {loading && !refreshing ? (
         <ActivityIndicator color="#6366f1" style={{ marginTop: 40 }} />
       ) : (
-        <ScrollView contentContainerStyle={styles.list}>
+        <ScrollView 
+          contentContainerStyle={styles.list}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchLeads(); }} tintColor="#6366f1" />}
+        >
           {/* Search Bar */}
           <View style={styles.searchRow}>
             <Ionicons name="search" size={18} color="#475569" />
@@ -183,8 +223,24 @@ export default function LeadsScreen() {
               <TouchableOpacity onPress={() => setSearchQuery('')}>
                 <Ionicons name="close-circle" size={18} color="#475569" />
               </TouchableOpacity>
-            ) : null}
+            ) : (
+              <TouchableOpacity onPress={() => { setRefreshing(true); fetchLeads(); }}>
+                <Ionicons name="refresh-outline" size={18} color="#6366f1" />
+              </TouchableOpacity>
+            )}
           </View>
+
+          {activeFilter === 'today' && (
+            <View style={styles.activeFilterRow}>
+              <View style={styles.filterTag}>
+                <Ionicons name="alarm-outline" size={14} color={C.amber} />
+                <Text style={styles.filterTagText}>Showing: Today's Follow-ups</Text>
+              </View>
+              <TouchableOpacity onPress={() => setActiveFilter(null)}>
+                <Text style={styles.clearFilterText}>Clear Filter</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* ── Return from Sale section ───────────────────────── */}
           {filteredReturned.length > 0 && (
@@ -418,7 +474,7 @@ export default function LeadsScreen() {
                       const meta = OPTION_META[k];
                       if (!data || !meta) return null;
                       return (
-                        <View key={k} style={{ borderWidth: 1, borderColor: meta.color + '44', borderRadius: 12, padding: 12, backgroundColor: '#0f172a' }}>
+                        <View key={k} style={{ borderWidth: 1, borderColor: meta.color + '33', borderRadius: R.md, padding: 12, backgroundColor: C.surface2 }}>
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#1e293b', paddingBottom: 8, marginBottom: 8 }}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                               <Ionicons name={meta.icon as any} size={16} color={meta.color} />
@@ -466,58 +522,66 @@ function FormField({ label, value, onChangeText, placeholder, keyboardType = 'de
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a' },
-  list: { padding: 16, gap: 12 },
-  card: { backgroundColor: '#1e293b', borderRadius: 14, padding: 16, gap: 8 },
+  container: { flex: 1, backgroundColor: C.bg },
+  list: { padding: S.lg, gap: S.sm },
+  card: {
+    backgroundColor: C.surface, borderRadius: R.lg, padding: S.lg, gap: S.sm,
+    borderWidth: 1, borderColor: C.border,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
+  },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  leadName: { color: '#f8fafc', fontSize: 16, fontWeight: '700', flex: 1 },
-  statusBadge: { borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3 },
-  statusText: { fontSize: 12, fontWeight: '600' },
+  leadName: { color: C.textPrimary, fontSize: 16, fontWeight: '800', flex: 1 },
+  statusBadge: { borderRadius: R.full, paddingHorizontal: S.sm, paddingVertical: 4 },
+  statusText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
   cardRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  cardMeta: { color: '#94a3b8', fontSize: 13 },
-  empty: { color: '#475569', textAlign: 'center', marginTop: 60, fontSize: 15 },
-  // Return from Sale
-  returnSection: { backgroundColor: '#1e293b', borderRadius: 14, padding: 14, gap: 10, borderWidth: 1.5, borderColor: '#f59e0b44' },
-  returnHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  returnHeaderText: { color: '#f59e0b', fontSize: 14, fontWeight: '700' },
-  returnCard: { backgroundColor: '#0f172a', borderRadius: 10, padding: 12 },
-  returnCardTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  reassignBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#6366f1', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7 },
+  cardMeta: { color: C.textMuted, fontSize: 13 },
+  empty: { color: C.textMuted, textAlign: 'center', marginTop: 60, fontSize: 15 },
+  returnSection: {
+    backgroundColor: C.amberLight, borderRadius: R.lg, padding: S.md, gap: S.sm,
+    borderWidth: 1.5, borderColor: C.amber + '55',
+  },
+  returnHeader: { flexDirection: 'row', alignItems: 'center', gap: S.xs },
+  returnHeaderText: { color: C.amber, fontSize: 14, fontWeight: '800' },
+  returnCard: { backgroundColor: C.surface, borderRadius: R.sm, padding: S.sm, borderWidth: 1, borderColor: C.border },
+  returnCardTop: { flexDirection: 'row', alignItems: 'center', gap: S.sm },
+  reassignBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.primary, borderRadius: R.sm, paddingHorizontal: S.sm, paddingVertical: 7 },
   reassignBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  // Picker
-  overlay: { flex: 1, backgroundColor: '#00000088', justifyContent: 'flex-end' },
-  pickerSheet: { backgroundColor: '#1e293b', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 4, paddingBottom: 40 },
-  pickerTitle: { color: '#94a3b8', fontSize: 12, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 },
-  pickerItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 13, paddingHorizontal: 10, borderRadius: 10 },
-  pickerItemActive: { backgroundColor: '#6366f122' },
-  pickerItemText: { flex: 1, color: '#cbd5e1', fontSize: 15 },
+  overlay: { flex: 1, backgroundColor: '#00000044', justifyContent: 'flex-end' },
+  pickerSheet: { backgroundColor: C.surface, borderTopLeftRadius: R.xxl, borderTopRightRadius: R.xxl, padding: S.xl, gap: 4, paddingBottom: 40, borderTopWidth: 1, borderColor: C.border },
+  pickerTitle: { color: C.textMuted, fontSize: 11, fontWeight: '800', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: S.sm },
+  pickerItem: { flexDirection: 'row', alignItems: 'center', gap: S.sm, paddingVertical: 13, paddingHorizontal: S.sm, borderRadius: R.sm },
+  pickerItemActive: { backgroundColor: C.primaryLight },
+  pickerItemText: { flex: 1, color: C.textSecond, fontSize: 15 },
   fab: {
     position: 'absolute', bottom: 24, right: 24,
     width: 56, height: 56, borderRadius: 28,
-    backgroundColor: '#6366f1', justifyContent: 'center', alignItems: 'center',
-    shadowColor: '#6366f1', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 12, elevation: 8,
+    backgroundColor: C.primary, justifyContent: 'center', alignItems: 'center',
+    shadowColor: C.primary, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 14, elevation: 8,
   },
-  modal: { flex: 1, backgroundColor: '#0f172a' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 24, borderBottomWidth: 1, borderBottomColor: '#1e293b' },
-  modalTitle: { color: '#f8fafc', fontSize: 20, fontWeight: '700' },
-  formContent: { padding: 20, gap: 16 },
-  fieldGroup: { gap: 6 },
-  fieldLabel: { color: '#94a3b8', fontSize: 13, fontWeight: '600' },
-  input: { backgroundColor: '#1e293b', color: '#f8fafc', borderRadius: 10, padding: 14, fontSize: 15, borderWidth: 1, borderColor: '#334155' },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7, backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155' },
-  chipActive: { backgroundColor: '#6366f1', borderColor: '#6366f1' },
-  chipText: { color: '#94a3b8', fontSize: 13, fontWeight: '600' },
-  chipTextActive: { color: '#fff' },
-  saveBtn: { backgroundColor: '#6366f1', borderRadius: 12, paddingVertical: 15, alignItems: 'center', marginTop: 8 },
-  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  // Lead Details
-  modalSub: { color: '#10b981', fontSize: 13, fontWeight: '600', marginTop: 2 },
-  detailRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
-  detailText: { color: '#94a3b8', fontSize: 15 },
-  box: { borderWidth: 1.5, borderRadius: 14, padding: 14, gap: 10, backgroundColor: '#1e293b22', borderColor: '#334155' },
-  subHeading: { color: '#cbd5e1', fontSize: 13, fontWeight: '700', marginTop: 4 },
-  callLogBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#0f172a', padding: 12, borderRadius: 10, marginTop: 10, borderWidth: 1, borderColor: '#334155' },
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#1e293b', borderRadius: 12, paddingHorizontal: 12, height: 48, marginBottom: 16, borderWidth: 1, borderColor: '#334155' },
-  searchInput: { flex: 1, color: '#f8fafc', fontSize: 14 },
+  modal: { flex: 1, backgroundColor: C.bg },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: S.xl, paddingTop: S.xxl, borderBottomWidth: 1, borderBottomColor: C.border, backgroundColor: C.surface },
+  modalTitle: { color: C.textPrimary, fontSize: 20, fontWeight: '800' },
+  formContent: { padding: S.xl, gap: S.lg },
+  fieldGroup: { gap: S.xs },
+  fieldLabel: { color: C.textSecond, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  input: { backgroundColor: C.surface2, color: C.textPrimary, borderRadius: R.sm, padding: S.md, fontSize: 15, borderWidth: 1.5, borderColor: C.border },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: S.xs },
+  chip: { borderRadius: R.full, paddingHorizontal: S.md, paddingVertical: 8, backgroundColor: C.surface2, borderWidth: 1, borderColor: C.border },
+  chipActive: { backgroundColor: C.primaryLight, borderColor: C.primary },
+  chipText: { color: C.textMuted, fontSize: 13, fontWeight: '600' },
+  chipTextActive: { color: C.primary, fontWeight: '800' },
+  saveBtn: { backgroundColor: C.primary, borderRadius: R.md, paddingVertical: 15, alignItems: 'center', marginTop: S.xs, shadowColor: C.primary, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 6 },
+  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  modalSub: { color: C.green, fontSize: 13, fontWeight: '600', marginTop: 2 },
+  detailRow: { flexDirection: 'row', alignItems: 'center', gap: S.sm, marginTop: 4 },
+  detailText: { color: C.textSecond, fontSize: 15 },
+  box: { borderWidth: 1, borderRadius: R.lg, padding: S.md, gap: S.sm, backgroundColor: C.surface, borderColor: C.border },
+  subHeading: { color: C.textPrimary, fontSize: 13, fontWeight: '800', marginTop: 4 },
+  callLogBtn: { flexDirection: 'row', alignItems: 'center', gap: S.sm, backgroundColor: C.surface2, padding: S.sm, borderRadius: R.sm, marginTop: S.sm, borderWidth: 1, borderColor: C.border },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: S.sm, backgroundColor: C.surface, borderRadius: R.md, paddingHorizontal: S.md, height: 48, marginBottom: S.lg, borderWidth: 1, borderColor: C.border, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1 },
+  searchInput: { flex: 1, color: C.textPrimary, fontSize: 14 },
+  activeFilterRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: S.lg, paddingHorizontal: S.sm },
+  filterTag: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.amberLight, paddingHorizontal: 10, paddingVertical: 6, borderRadius: R.sm, borderWidth: 1, borderColor: C.amber + '33' },
+  filterTagText: { color: C.amber, fontSize: 12, fontWeight: '700' },
+  clearFilterText: { color: C.primary, fontSize: 12, fontWeight: '800' },
 });
