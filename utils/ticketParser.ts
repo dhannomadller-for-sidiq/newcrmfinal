@@ -3,7 +3,7 @@ import * as FileSystem from 'expo-file-system';
 
 // NOTE: In a production app, this API key should ideally be handled via a secure backend 
 // or Supabase Edge Function to prevent exposure. 
-const API_KEY = "AIzaSyAThbAsRKjbC-ZAhV9Qr688xMkyetpgzTQ";
+const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || "AIzaSyCXxF6vZM2GX2CjqWWLK4nH9qgt7r0O3cY";
 const genAI = new GoogleGenerativeAI(API_KEY);
 
 export interface ParsedTicketData {
@@ -46,8 +46,8 @@ export async function parseTicketFile(uri: string, mimeType: string): Promise<Pa
     return null;
   }
 
-  // Try these stable models identified as available for this key
-  const modelsToTry = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3-flash-preview"];
+  // Try these stable models
+  const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro"];
   
   const prompt = `
     Analyze this ticket and extract journey details into a JSON array.

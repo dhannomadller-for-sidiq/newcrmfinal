@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+ import { useState, useCallback, useEffect } from 'react';
 import { Alert } from 'react-native';
 import { supabase } from '@/utils/supabase';
 import { useAuth } from '@/contexts/AuthContext';

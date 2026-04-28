@@ -414,7 +414,9 @@ export function EditProfileModal({ visible, onClose, lead, destinations, itinera
                     if (!itin) return null;
                     return Object.keys(itin.pricing_data).map(k => {
                       const meta = OPTION_META[k];
-                      const price = (itin.pricing_data[k] as any)?.price ?? itin.pricing_data[k];
+                      const priceData = itin.pricing_data[k] as any;
+                      const price = priceData?.price ?? priceData;
+                      const priceUsd = priceData?.price_usd;
                       if (!meta) return null;
                       return (
                         <TouchableOpacity key={k} style={[styles.card, { padding: 12, borderLeftWidth: 4, borderLeftColor: fItinOption === k ? meta.color : '#1e1e1e' }]} onPress={() => setFItinOption(k)}>
@@ -423,7 +425,10 @@ export function EditProfileModal({ visible, onClose, lead, destinations, itinera
                               <Ionicons name={meta.icon as any} size={16} color={fItinOption === k ? meta.color : '#475569'} />
                               <Text style={[styles.bookGridValue, fItinOption === k && { color: meta.color }]}>{meta.label}</Text>
                             </View>
-                            <Text style={{ color: fItinOption === k ? meta.color : '#f8fafc', fontWeight: '800' }}>₹{price}</Text>
+                            <View style={{ alignItems: 'flex-end' }}>
+                              {priceUsd && <Text style={{ color: fItinOption === k ? meta.color : '#94a3b8', fontSize: 12, fontWeight: '600', marginBottom: 2 }}>${Number(priceUsd).toLocaleString()}</Text>}
+                              {price && <Text style={{ color: fItinOption === k ? meta.color : '#f8fafc', fontWeight: '800' }}>₹{Number(price).toLocaleString()}</Text>}
+                            </View>
                           </View>
                         </TouchableOpacity>
                       );

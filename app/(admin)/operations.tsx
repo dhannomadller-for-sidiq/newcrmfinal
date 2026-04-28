@@ -260,8 +260,32 @@ export default function OperationsScreen() {
       // Aggressively remove ALL transport modes from the list
       ids = ids.filter(id => !transportModes.includes(id));
       // Insert the unified transport choice at the original anchor position
-      ids.splice(firstTransportIdx, 0, 'transport_choice');
+      ids.splice(firstTransportIdx > -1 ? firstTransportIdx : ids.length, 0, 'transport_choice');
     }
+
+    // Force strict ordering as requested
+    const MASTER_ORDER = [
+      'guests',
+      'passport',
+      'id_card',
+      'transport_choice',
+      'itinerary',
+      'inc_exc',
+      'hotels',
+      'important_info',
+      'info',
+      'payment',
+      'pdf'
+    ];
+
+    ids.sort((a, b) => {
+      const idxA = MASTER_ORDER.indexOf(a.toLowerCase());
+      const idxB = MASTER_ORDER.indexOf(b.toLowerCase());
+      if (idxA === -1 && idxB === -1) return 0;
+      if (idxA === -1) return 1;
+      if (idxB === -1) return -1;
+      return idxA - idxB;
+    });
 
     const MODULAR_MAP: Record<string, string> = {
       'guests': 'Guest Details',
