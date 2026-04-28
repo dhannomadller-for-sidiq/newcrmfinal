@@ -1,10 +1,10 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import * as FileSystem from 'expo-file-system';
 
-// NOTE: In a production app, this API key should ideally be handled via a secure backend 
-// or Supabase Edge Function to prevent exposure. 
-const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || "AIzaSyCXxF6vZM2GX2CjqWWLK4nH9qgt7r0O3cY";
-const genAI = new GoogleGenerativeAI(API_KEY);
+// NOTE: In a production app, this API key should be handled via a secure backend 
+// or Supabase Edge Function. Do NOT hardcode it here.
+const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+const genAI = API_KEY ? new GoogleGenerativeAI(API_KEY) : null;
 
 export interface ParsedTicketData {
   transport_type?: 'flight' | 'train' | 'bus';
@@ -68,6 +68,10 @@ export async function parseTicketFile(uri: string, mimeType: string): Promise<Pa
 
   for (const modelName of modelsToTry) {
     try {
+      if (!genAI) {
+        console.error("Gemini API not initialized. Missing API Key.");
+        return null;
+      }
       console.log(`✨ AI attempting with model: ${modelName} (V1BETA API)`);
       const model = genAI.getGenerativeModel({ model: modelName }, { apiVersion: 'v1beta' });
       
